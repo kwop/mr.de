@@ -88,10 +88,12 @@ fn build(stats: &DiffStats, history: Option<&[FileHistory]>) -> Option<Model> {
                     )
                 }
                 None => (
-                    format!("+{} files", tile.files),
-                    format!(
-                        "{} smaller files in {}\n{} lines changed",
-                        tile.files, map.zones[tile.zone].name, tile.changed
+                    crate::tr!("+{value0} files", value0 = tile.files),
+                    crate::tr!(
+                        "{value0} smaller files in {value1}\n{value2} lines changed",
+                        value0 = tile.files,
+                        value1 = map.zones[tile.zone].name,
+                        value2 = tile.changed
                     ),
                 ),
             };
@@ -149,10 +151,12 @@ fn build(stats: &DiffStats, history: Option<&[FileHistory]>) -> Option<Model> {
             .collect(),
     };
     Some(Model {
-        summary: format!(
-            "{} files · +{added} −{removed} · {}",
-            stats.files.len(),
-            match stats.source {
+        summary: crate::tr!(
+            "{value0} files · +{added} −{removed} · {value1}",
+            value0 = stats.files.len(),
+            added = added,
+            removed = removed,
+            value1 = match stats.source {
                 StatsSource::Git => "exact (git)",
                 StatsSource::GitLab => "estimate (GitLab diff)",
             }
@@ -296,7 +300,7 @@ impl Cockpit {
                         Button::new(SharedString::from(format!("disktree-{label}")))
                             .xsmall()
                             .ghost()
-                            .label(label)
+                            .label(crate::i18n::t(label))
                             .when(selected, |b| b.bg(rgb(SELECTED)).text_color(rgb(HEADING)))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.risk_colors = risk;
@@ -314,7 +318,7 @@ impl Cockpit {
                     div()
                         .text_size(px(13.))
                         .text_color(rgb(HEADING))
-                        .child("Disktree"),
+                        .child(crate::i18n::t("Disktree")),
                 )
                 .when(analyzed, |row| row.child(toggle)),
         );

@@ -59,12 +59,13 @@ impl Cockpit {
             .gap_4()
             .child(
                 heading(
-                    "Visual comparison",
+                    crate::i18n::t("Visual comparison"),
                     report.map(|r| {
                         let changed = r.screens.iter().filter(|s| s.changed != Some(0.0)).count();
-                        format!(
-                            "{} · {changed} changed",
-                            count(r.screens.len(), "screen", "screens")
+                        crate::tr!(
+                            "{value0} · {changed} changed",
+                            value0 = count(r.screens.len(), "screen", "screens"),
+                            changed = changed
                         )
                     }),
                 )
@@ -76,9 +77,9 @@ impl Cockpit {
                             Button::new("capture-visual")
                                 .small()
                                 .label(if report.is_some() {
-                                    "Capture again"
+                                    crate::i18n::t("Capture again")
                                 } else {
-                                    "Capture screenshots"
+                                    crate::i18n::t("Capture screenshots")
                                 })
                                 .disabled(!configured || self.is_busy() || self.confirm)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -96,34 +97,37 @@ impl Cockpit {
         if !configured {
             view = view.child(
                 card()
-                    .child(muted("Set a screenshot command in GitLab settings to compare the interface before and after the MR."))
-                    .child(muted("mr.de runs it in a worktree of the base commit and one of the MR commit, with MRDE_SCREENSHOTS_DIR set to an output folder and MRDE_SIDE set to before or after. It must write PNG files there, for example with Playwright.")),
+                    .child(muted(crate::i18n::t("Set a screenshot command in GitLab settings to compare the interface before and after the MR.")))
+                    .child(muted(crate::i18n::t("mr.de runs it in a worktree of the base commit and one of the MR commit, with MRDE_SCREENSHOTS_DIR set to an output folder and MRDE_SIDE set to before or after. It must write PNG files there, for example with Playwright."))),
             );
         } else if report.is_none() {
-            view = view.child(muted(format!(
-                "Command: {}. It runs only when you click; both worktrees are created if missing.",
-                self.config.visual_command.trim()
-            )));
+            view = view.child(muted(crate::tr!("Command: {value0}. It runs only when you click; both worktrees are created if missing.", value0 = self.config.visual_command.trim())));
         }
         let Some(report) = report else {
             return view.into_any_element();
         };
         if report.screens.is_empty() {
-            view = view.child(muted(
+            view = view.child(muted(crate::i18n::t(
                 "The command produced no PNG file in MRDE_SCREENSHOTS_DIR.",
-            ));
+            )));
         }
         for (index, screen) in report.screens.iter().enumerate() {
             let status = match (screen.changed, &screen.before, &screen.after) {
-                (_, None, Some(_)) => badge("new screen", INFO),
-                (_, Some(_), None) => badge("removed screen", WARNING),
-                (Some(0.0), _, _) => badge("unchanged", SUBTLE),
+                (_, None, Some(_)) => badge(crate::i18n::t("new screen"), INFO),
+                (_, Some(_), None) => badge(crate::i18n::t("removed screen"), WARNING),
+                (Some(0.0), _, _) => badge(crate::i18n::t("unchanged"), SUBTLE),
                 // Images of different sizes are not compared pixel by pixel.
-                (Some(_), _, _) if screen.diff.is_none() => badge("size changed", WARNING),
-                (Some(ratio), _, _) => {
-                    badge(format!("{:.1}% of pixels changed", ratio * 100.), WARNING)
+                (Some(_), _, _) if screen.diff.is_none() => {
+                    badge(crate::i18n::t("size changed"), WARNING)
                 }
-                _ => badge("not compared", SUBTLE),
+                (Some(ratio), _, _) => badge(
+                    crate::tr!(
+                        "{value0}% of pixels changed",
+                        value0 = format!("{:.1}", ratio * 100.)
+                    ),
+                    WARNING,
+                ),
+                _ => badge(crate::i18n::t("not compared"), SUBTLE),
             };
             view = view.child(
                 card()

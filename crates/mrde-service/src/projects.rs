@@ -12,10 +12,13 @@ pub struct Projects {
     pub version: u32,
     pub active: String,
     pub projects: Vec<Config>,
+    #[serde(default)]
+    pub languages: mrde_core::language::Languages,
 }
 impl Projects {
     pub fn single(config: Config) -> Self {
         Self {
+            languages: config.languages,
             version: 1,
             active: config.id.clone(),
             projects: vec![config],
@@ -56,6 +59,10 @@ impl Projects {
             .iter()
             .find(|p| p.id == self.active)
             .cloned()
+            .map(|mut config| {
+                config.languages = self.languages;
+                config
+            })
             .context("The active project does not exist in projects.toml")
     }
     pub fn upsert(&mut self, config: Config) {

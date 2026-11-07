@@ -15,6 +15,7 @@ struct ControlledSettings {
     tests: AtomicUsize,
     saves: AtomicUsize,
     preferences: std::sync::Mutex<Vec<(Vec<MrRole>, QueueSort)>>,
+    languages: std::sync::Mutex<Vec<mrde_core::language::Languages>>,
 }
 impl ControlledSettings {
     fn new(fail: bool) -> Self {
@@ -24,11 +25,23 @@ impl ControlledSettings {
             tests: 0.into(),
             saves: 0.into(),
             preferences: Default::default(),
+            languages: Default::default(),
         }
     }
 }
 #[async_trait]
 impl ConnectionSettings for ControlledSettings {
+    async fn save_languages(
+        &self,
+        languages: mrde_core::language::Languages,
+    ) -> anyhow::Result<()> {
+        if self.fail {
+            anyhow::bail!("Cannot save languages");
+        }
+        self.languages.lock().unwrap().push(languages);
+        Ok(())
+    }
+
     async fn activate_project(&self, id: String) -> anyhow::Result<Config> {
         if self.fail {
             anyhow::bail!("Cannot activate project");
@@ -2306,3 +2319,5 @@ mod risk;
 mod threads;
 
 mod logs;
+
+mod languages;

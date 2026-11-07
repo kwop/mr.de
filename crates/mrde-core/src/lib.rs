@@ -1,6 +1,7 @@
 pub mod config;
 pub mod inbox;
 pub mod insights;
+pub mod language;
 pub mod models;
 pub mod resolver;
 pub mod review;

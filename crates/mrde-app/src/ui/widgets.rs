@@ -116,9 +116,9 @@ pub(super) fn level_label(level: Level) -> &'static str {
 /// "1 file", "3 files".
 pub(super) fn count(value: usize, one: &str, many: &str) -> String {
     if value == 1 {
-        format!("1 {one}")
+        format!("1 {}", crate::i18n::text(one))
     } else {
-        format!("{value} {many}")
+        format!("{value} {}", crate::i18n::text(many))
     }
 }
 
@@ -161,9 +161,9 @@ impl Cockpit {
                 Button::new(id)
                     .small()
                     .label(if analyzed {
-                        "Analyze again"
+                        crate::i18n::t("Analyze again")
                     } else {
-                        "Analyze worktree"
+                        crate::i18n::t("Analyze worktree")
                     })
                     .disabled(self.is_busy() || self.confirm)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -184,7 +184,7 @@ impl Cockpit {
             .debug_selector(|| "analyze-prompt".into())
             .child(muted(text))
             .child(muted(
-                "The analysis runs Git locally in the MR worktree (created if missing); only overlapping MRs query GitLab.",
+                crate::i18n::t("The analysis runs Git locally in the MR worktree (created if missing); only overlapping MRs query GitLab."),
             ))
             .child(div().flex().child(self.analyze_button("analyze-from-tab", cx)))
             .into_any_element()

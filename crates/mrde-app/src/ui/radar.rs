@@ -40,28 +40,35 @@ pub(super) fn raw_text(raw: &RawMetric) -> String {
     };
     match raw.unit.as_str() {
         "fraction" => format!("{:.0}%", value * 100.),
-        "weighted fraction" => format!("{:.0}% weighted", value * 100.),
-        "CCN delta" => format!("{}{number} CCN", if value > 0. { "+" } else { "" }),
-        unit => format!("{number} {unit}"),
+        "weighted fraction" => crate::tr!(
+            "{value0}% weighted",
+            value0 = format!("{:.0}", value * 100.)
+        ),
+        "CCN delta" => crate::tr!(
+            "{value0}{number} CCN",
+            value0 = if value > 0. { "+" } else { "" },
+            number = number
+        ),
+        unit => format!("{number} {}", crate::i18n::text(unit)),
     }
 }
 
 /// The tooltip of an axis: measurement, score, median, and method or missing reason.
 pub(super) fn explanation(score: &AxisScore, median: Option<f64>) -> String {
     let median = median
-        .map(|m| format!(" · team median {m:.1}"))
+        .map(|m| crate::tr!(" · team median {m}", m = format!("{m:.1}")))
         .unwrap_or_default();
     match (&score.raw, score.score) {
         (Some(raw), Some(value)) => format!(
             "{}: {} → {value:.1} / 10{median}\n{}{}",
-            score.axis.label(),
+            crate::i18n::t(score.axis.label()),
             raw_text(raw),
             if raw.estimated { "Estimate. " } else { "" },
             raw.method
         ),
         _ => format!(
             "{}: n/a{median}\n{}",
-            score.axis.label(),
+            crate::i18n::t(score.axis.label()),
             score.unavailable.as_deref().unwrap_or("Not measured")
         ),
     }
@@ -234,10 +241,10 @@ pub(super) fn miniature(scores: [Option<f64>; mrde_core::risk::Axis::COUNT]) -> 
     let tooltip = if known.is_empty() {
         "Risk not calculated".to_string()
     } else {
-        format!(
-            "Risk {:.1}/10 · {}/9 axes · cached",
-            known.iter().sum::<f64>() / known.len() as f64,
-            known.len()
+        crate::tr!(
+            "Risk {value0}/10 · {value1}/9 axes · cached",
+            value0 = format!("{:.1}", known.iter().sum::<f64>() / known.len() as f64),
+            value1 = known.len()
         )
     };
     div()
@@ -289,11 +296,10 @@ pub(super) fn radar(
                     .child(score.score.map_or("n/a".into(), |s| format!("{s:.1}"))),
             )
             .when_some(median, |row, median| {
-                row.child(
-                    div()
-                        .text_color(rgb(SUBTLE))
-                        .child(format!("· med {median:.1}")),
-                )
+                row.child(div().text_color(rgb(SUBTLE)).child(crate::tr!(
+                    "· med {median}",
+                    median = format!("{median:.1}")
+                )))
             });
         let label = div()
             .id(SharedString::from(format!("risk-axis-{}", axis.id())))
@@ -309,7 +315,7 @@ pub(super) fn radar(
                 div()
                     .text_color(rgb(if chosen { INFO } else { INK }))
                     .when(chosen, |d| d.font_weight(FontWeight::SEMIBOLD))
-                    .child(axis.label()),
+                    .child(crate::i18n::t(axis.label())),
             )
             .child(values)
             .tooltip({

@@ -55,7 +55,7 @@ def main():
     if args.provision_only:
         print("Provisioned wrapper ready; run again without --provision-only to package Rust.")
         return
-    cargo = ["cargo", "build", "--locked", "-p", "mrde"]
+    cargo = ["cargo", "build", "--locked", "-p", "mrde", "-p", "mrde-tui"]
     if args.release:
         cargo.append("--release")
     run(cargo, cwd=root)
@@ -76,6 +76,11 @@ def main():
         rights.write_bytes(plistlib.dumps(entitlements))
         binary = root / "target" / ("release" if args.release else "debug") / "mrde"
         shutil.copy2(binary, app / "Contents/MacOS/mrde")
+        terminal = app / "Contents/MacOS/mrde-tui"
+        shutil.copy2(binary.with_name("mrde-tui"), terminal)
+        run(["codesign", "--force", "--sign", identity, "--identifier", BUNDLE_ID,
+             "--entitlements", str(rights), str(terminal)])
+        run(["codesign", "--verify", "--strict", str(terminal)])
         run(["codesign", "--force", "--sign", identity, "--identifier", BUNDLE_ID,
              "--entitlements", str(rights), str(app)])
     run(["codesign", "--verify", "--strict", "--verbose=2", str(app)])

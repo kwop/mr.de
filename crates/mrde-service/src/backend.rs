@@ -111,6 +111,11 @@ pub struct AskReady {
     pub prompt: String,
 }
 impl AskReady {
+    pub fn in_language(mut self, language: mrde_core::language::Language) -> Self {
+        self.prompt = mrde_claude::localized_prompt(&self.prompt, language);
+        self
+    }
+
     pub fn new(
         detail: &MrDetail,
         worktree: PathBuf,
@@ -343,12 +348,15 @@ impl Executor for PreviewExecutor {
             // The preview opens a harmless local shell instead of Claude Code.
             Action::Ask(detail, _) => {
                 let directory = std::env::temp_dir();
-                Outcome::Ask(Box::new(AskReady::new(
-                    &detail,
-                    directory.clone(),
-                    directory.clone(),
-                    &directory.join("context.md"),
-                )))
+                Outcome::Ask(Box::new(
+                    AskReady::new(
+                        &detail,
+                        directory.clone(),
+                        directory.clone(),
+                        &directory.join("context.md"),
+                    )
+                    .in_language(config.languages.information),
+                ))
             }
             Action::Analyze(detail) => {
                 Outcome::Insights(detail.mr.id.clone(), Box::new(demo::insights(&detail)))
@@ -545,7 +553,12 @@ pub async fn run(env: &Env, config: Config, action: Action) -> anyhow::Result<Ou
             let mut review = None;
             // Show the most thorough cached review for this exact commit and context.
             for level in ReviewLevel::ALL.into_iter().rev() {
-                let key = mrde_claude::cache_key(&config.namespace(), &detail, level)?;
+                let key = mrde_claude::cache_key_in_language(
+                    &config.namespace(),
+                    &detail,
+                    level,
+                    config.languages.information,
+                )?;
                 if let Some(found) = store.review(&key)? {
                     review = Some((level, found));
                     break;
@@ -610,7 +623,13 @@ pub async fn run(env: &Env, config: Config, action: Action) -> anyhow::Result<Ou
             let path = Worktrees::new(&env.cache, &config.namespace())
                 .prepare(&detail)
                 .await?;
-            let tour = mrde_claude::tour(&config.claude_path, &path, &detail).await?;
+            let tour = mrde_claude::tour_in_language(
+                &config.claude_path,
+                &path,
+                &detail,
+                config.languages.information,
+            )
+            .await?;
             let key = cached_key("tour", &config, &detail)?;
             let _ = env.store().and_then(|s| s.save_cached(&key, &tour));
             Ok(Outcome::Tour(
@@ -677,8 +696,14 @@ pub async fn run(env: &Env, config: Config, action: Action) -> anyhow::Result<Ou
                 .prepare(&detail)
                 .await?;
             mrde_git::ensure_clean(&path).await?;
-            let result =
-                mrde_claude::check_compliance(&config.claude_path, &path, &spec, &detail).await?;
+            let result = mrde_claude::check_compliance_in_language(
+                &config.claude_path,
+                &path,
+                &spec,
+                &detail,
+                config.languages.information,
+            )
+            .await?;
             let _ = env
                 .store()
                 .and_then(|s| s.record("compliance", &detail.mr.web_url));
@@ -709,12 +734,10 @@ pub async fn run(env: &Env, config: Config, action: Action) -> anyhow::Result<Ou
             let worktree = trees.prepare(&detail).await?;
             let context_dir = env.cache.join("context");
             let file = mrde_claude::write_context(&context_dir, &detail, review.as_ref())?;
-            Ok(Outcome::Ask(Box::new(AskReady::new(
-                &detail,
-                worktree,
-                context_dir,
-                &file,
-            ))))
+            Ok(Outcome::Ask(Box::new(
+                AskReady::new(&detail, worktree, context_dir, &file)
+                    .in_language(config.languages.information),
+            )))
         }
         Action::Approve(detail) => {
             forge.approve(&detail.mr.id, &detail.mr.sha).await?;
@@ -739,7 +762,16 @@ pub async fn run(env: &Env, config: Config, action: Action) -> anyhow::Result<Ou
 fn cached_key(kind: &str, config: &Config, detail: &MrDetail) -> anyhow::Result<String> {
     Ok(format!(
         "{kind}:{}",
-        mrde_claude::cache_key(&config.namespace(), detail, ReviewLevel::Standard)?
+        mrde_claude::cache_key_in_language(
+            &config.namespace(),
+            detail,
+            ReviewLevel::Standard,
+            if kind == "tour" {
+                config.languages.information
+            } else {
+                mrde_core::language::Language::English
+            }
+        )?
     ))
 }
 
@@ -757,11 +789,14 @@ impl mrde_core::review::ReviewServices for ReviewAdapter<'_> {
         detail: &MrDetail,
         level: ReviewLevel,
     ) -> anyhow::Result<Option<Review>> {
-        self.env.store()?.review(&mrde_claude::cache_key(
-            &self.config.namespace(),
-            detail,
-            level,
-        )?)
+        self.env
+            .store()?
+            .review(&mrde_claude::cache_key_in_language(
+                &self.config.namespace(),
+                detail,
+                level,
+                self.config.languages.information,
+            )?)
     }
     async fn prepare(&self, detail: &MrDetail) -> anyhow::Result<std::path::PathBuf> {
         let path = Worktrees::new(&self.env.cache, &self.config.namespace())
@@ -776,7 +811,14 @@ impl mrde_core::review::ReviewServices for ReviewAdapter<'_> {
         detail: &MrDetail,
         level: ReviewLevel,
     ) -> anyhow::Result<Review> {
-        mrde_claude::analyze(&self.config.claude_path, directory, detail, level).await
+        mrde_claude::analyze_in_language(
+            &self.config.claude_path,
+            directory,
+            detail,
+            level,
+            self.config.languages.information,
+        )
+        .await
     }
     async fn save(
         &self,
@@ -786,7 +828,12 @@ impl mrde_core::review::ReviewServices for ReviewAdapter<'_> {
     ) -> anyhow::Result<()> {
         let store = self.env.store()?;
         store.save_review(
-            &mrde_claude::cache_key(&self.config.namespace(), detail, level)?,
+            &mrde_claude::cache_key_in_language(
+                &self.config.namespace(),
+                detail,
+                level,
+                self.config.languages.information,
+            )?,
             review,
         )?;
         store.record("pre-review", &detail.mr.web_url)

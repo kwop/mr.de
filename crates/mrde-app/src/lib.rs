@@ -2,6 +2,7 @@ mod backend;
 mod deferred;
 mod demo;
 mod ellipsis;
+mod i18n;
 mod image_viewer;
 mod images;
 mod markdown;

@@ -3,6 +3,11 @@
 version = 1
 active = "platform"
 
+# Global, independent preferences shared by desktop and terminal. Defaults: en / en.
+[languages]
+interface = "en" # en or fr
+information = "en" # Claude summaries and new conversations; JSON keys stay unchanged
+
 [[projects]]
 id = "platform"
 name = "Platform"
@@ -19,7 +24,7 @@ visual_command = ""
 [[projects]]
 id = "community"
 name = "Community"
-provider = "github" # profile only; connector not available yet
+provider = "github"
 url = "https://github.com"
 group = "example-org"
 # All other non-secret options default independently for this project.

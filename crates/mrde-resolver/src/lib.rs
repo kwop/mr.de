@@ -405,7 +405,7 @@ impl Services for SystemServices {
             &self.config.claude_path,
             &self.tree(thread)?.directory(),
             session,
-            prompt,
+            mrde_claude::localized_prompt(&prompt, self.config.languages.information),
             Arc::new(move |text| {
                 emit(Update::Output {
                     thread: id.clone(),

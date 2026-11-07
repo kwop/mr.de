@@ -142,6 +142,13 @@ pub trait ConnectionSettings: Send + Sync {
     async fn activate_project(&self, _id: String) -> anyhow::Result<Config> {
         bail!("Project switching is unavailable in this mode")
     }
+    /// Saves global language preferences without accessing credentials or the network.
+    async fn save_languages(
+        &self,
+        _languages: mrde_core::language::Languages,
+    ) -> anyhow::Result<()> {
+        bail!("Language preferences cannot be saved in this mode")
+    }
     /// Updates only non-secret queue preferences, without resolving credentials.
     async fn save_queue_preferences(
         &self,
@@ -194,6 +201,20 @@ impl SettingsService {
 }
 #[async_trait]
 impl ConnectionSettings for SettingsService {
+    async fn save_languages(
+        &self,
+        languages: mrde_core::language::Languages,
+    ) -> anyhow::Result<()> {
+        let directory = self.directory.clone();
+        tokio::task::spawn_blocking(move || {
+            let _lock = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let mut catalog = Projects::load(&directory)?;
+            catalog.languages = languages;
+            catalog.save(&directory)
+        })
+        .await?
+    }
+
     async fn activate_project(&self, id: String) -> anyhow::Result<Config> {
         let directory = self.directory.clone();
         tokio::task::spawn_blocking(move || {
@@ -227,7 +248,8 @@ impl ConnectionSettings for SettingsService {
                 .context("Save this project before changing queue preferences")?;
             config.mr_roles = roles;
             config.mr_sort = sort;
-            let config = config.clone();
+            let mut config = config.clone();
+            config.languages = catalog.languages;
             catalog.save(&directory)?;
             Ok(config)
         })
@@ -275,7 +297,7 @@ impl ConnectionSettings for SettingsService {
             std::fs::rename(staged, directory.join("projects.toml"))
                 .context("Cannot activate configuration file")?;
             progress("Settings saved successfully".into());
-            Ok(draft.config)
+            catalog.current()
         })
         .await?
     }
@@ -294,6 +316,10 @@ pub fn redact(message: &str, secrets: &[String]) -> String {
 pub struct PreviewSettings;
 #[async_trait]
 impl ConnectionSettings for PreviewSettings {
+    async fn save_languages(&self, _: mrde_core::language::Languages) -> anyhow::Result<()> {
+        Ok(()) // Preview changes stay in memory.
+    }
+
     async fn activate_project(&self, id: String) -> anyhow::Result<Config> {
         let github = id == "community";
         Ok(Config {
@@ -607,3 +633,93 @@ mod tests {
 
 #[cfg(test)]
 mod projects_tests;
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+    use mrde_core::language::{Language, Languages};
+    struct NoSecrets;
+    impl Secrets for NoSecrets {
+        fn read(&self, _: &str, _: &str) -> anyhow::Result<String> {
+            panic!("language changes must not read credentials")
+        }
+        fn write(&self, _: &str, _: &str, _: &str) -> anyhow::Result<()> {
+            panic!("language changes must not write credentials")
+        }
+    }
+    #[tokio::test]
+    async fn languages_survive_project_and_queue_changes_without_credentials() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = SettingsService {
+            directory: directory.path().to_owned(),
+            secrets: Arc::new(NoSecrets),
+        };
+        let mut catalog = Projects::single(Config::default());
+        catalog.upsert(Config {
+            id: "second".into(),
+            name: "Second".into(),
+            ..Default::default()
+        });
+        catalog.save(directory.path()).unwrap();
+        let languages = Languages {
+            interface: Language::French,
+            information: Language::English,
+        };
+        service.save_languages(languages).await.unwrap();
+        let first = service.activate_project("default".into()).await.unwrap();
+        assert_eq!(first.languages, languages);
+        let saved = service
+            .save_queue_preferences(first, vec![MrRole::Author], QueueSort::Risk)
+            .await
+            .unwrap();
+        assert_eq!(saved.languages, languages);
+        assert_eq!(
+            Projects::load(directory.path())
+                .unwrap()
+                .current()
+                .unwrap()
+                .languages,
+            languages
+        );
+        assert_eq!(
+            service
+                .activate_project("second".into())
+                .await
+                .unwrap()
+                .languages,
+            languages
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("projects.toml"))
+                .unwrap()
+                .matches("[languages]")
+                .count(),
+            1
+        );
+    }
+    #[tokio::test]
+    async fn failure_does_not_replace_the_previous_languages() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = SettingsService {
+            directory: directory.path().to_owned(),
+            secrets: Arc::new(NoSecrets),
+        };
+        Projects::single(Config::default())
+            .save(directory.path())
+            .unwrap();
+        std::fs::create_dir(directory.path().join("projects.toml.tmp")).unwrap();
+        assert!(
+            service
+                .save_languages(Languages {
+                    interface: Language::French,
+                    information: Language::French
+                })
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            Projects::load(directory.path()).unwrap().languages,
+            Languages::default()
+        );
+    }
+}

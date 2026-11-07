@@ -79,6 +79,9 @@ impl Provider {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    /// Global presentation preferences, injected from projects.toml when loaded.
+    #[serde(skip)]
+    pub languages: crate::language::Languages,
     /// `default` is reserved for the imported single-connection configuration.
     pub id: String,
     pub name: String,
@@ -100,6 +103,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            languages: Default::default(),
             id: "default".into(),
             name: "Default project".into(),
             provider: Provider::Gitlab,

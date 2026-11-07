@@ -15,7 +15,7 @@ impl Cockpit {
                     .text_xs()
                     .text_color(rgb(MUTED))
                     .px_2()
-                    .child("PROJECT"),
+                    .child(crate::i18n::t("PROJECT")),
             )
             .child(
                 div().debug_selector(|| "project-switcher".into()).child(
@@ -55,7 +55,7 @@ impl Cockpit {
                         .ghost()
                         .w_full()
                         .icon(IconName::Plus)
-                        .label("New project")
+                        .label(crate::i18n::t("New project"))
                         .disabled(busy)
                         .on_click(cx.listener(|this, _, window, cx| {
                             let config = Config {
@@ -97,6 +97,7 @@ impl Cockpit {
         ] {
             input.update(cx, |input, cx| input.set_value(value, window, cx));
         }
+        self.language_draft = self.config.languages;
         self.draft_provider = config.provider;
         self.clear_cloudflare = false;
     }
@@ -127,8 +128,10 @@ impl Cockpit {
                     Ok(Ok(config)) => this.activate_project(config, window, cx),
                     result => {
                         this.status = match result {
-                            Ok(Err(e)) => format!("Cannot switch projects: {e:#}"),
-                            Err(e) => format!("Cannot switch projects: {e}"),
+                            Ok(Err(e)) => {
+                                crate::tr!("Cannot switch projects: {e}", e = format!("{e:#}"))
+                            }
+                            Err(e) => crate::tr!("Cannot switch projects: {e}", e = e),
                             _ => unreachable!(),
                         };
                         this.logs_open = true;
@@ -206,7 +209,9 @@ impl Cockpit {
         self.settings = config.gitlab_url.is_empty() || !config.provider.available();
         self.threads_view = false;
         self.worktrees_view = false;
-        self.status = format!("{} selected", config.name);
+        self.status = crate::tr!("{value0} selected", value0 = config.name);
+        self.language_draft = config.languages;
+        gpui_component::set_locale(config.languages.interface.code());
         self.config = config;
         self.last_refresh = Instant::now() - Duration::from_secs(86400);
         cx.notify();
@@ -217,7 +222,7 @@ impl Cockpit {
             .gap_2()
             .children([Provider::Gitlab, Provider::Github].map(|provider| {
                 Button::new(provider.label())
-                    .label(provider.label())
+                    .label(crate::i18n::t(provider.label()))
                     .when(self.draft_provider == provider, |b| b.bg(rgb(SELECTED)))
                     .disabled(self.is_busy())
                     .on_click(cx.listener(move |this, _, window, cx| {

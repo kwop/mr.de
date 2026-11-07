@@ -46,10 +46,10 @@ fn chip(axis: Axis, findings: usize) -> String {
         Axis::TestGap => "untested".into(),
         Axis::SensitivePaths => "sensitive".into(),
         Axis::Complexity => "complexity".into(),
-        Axis::Coupling => format!("coupling {findings}"),
-        Axis::Lint => format!("lint {findings}"),
-        Axis::Debt => format!("debt {findings}"),
-        Axis::DiffSize | Axis::Files | Axis::TicketAge => axis.label().into(),
+        Axis::Coupling => crate::tr!("coupling {findings}", findings = findings),
+        Axis::Lint => crate::tr!("lint {findings}", findings = findings),
+        Axis::Debt => crate::tr!("debt {findings}", findings = findings),
+        Axis::DiffSize | Axis::Files | Axis::TicketAge => crate::i18n::t(axis.label()).into(),
     }
 }
 
@@ -60,26 +60,28 @@ fn reason(profile: &RiskProfile, thresholds: &VerdictThresholds) -> String {
         .iter()
         .filter_map(|a| Some((a.axis, a.score?)))
         .filter(|(_, score)| *score >= thresholds.deep_axis)
-        .map(|(axis, score)| format!("{} {score:.1}", axis.label()))
+        .map(|(axis, score)| format!("{} {score:.1}", crate::i18n::t(axis.label())))
         .collect();
     let mean = profile.mean().unwrap_or_default();
     if !high.is_empty() {
-        format!(
-            "{} at or above the deep-review threshold ({})",
-            high.join(", "),
-            thresholds.deep_axis
+        crate::tr!(
+            "{value0} at or above the deep-review threshold ({value1})",
+            value0 = high.join(", "),
+            value1 = thresholds.deep_axis
         )
     } else if mean >= thresholds.deep_mean {
-        format!("Mean at or above {}", thresholds.deep_mean)
+        crate::tr!("Mean at or above {value0}", value0 = thresholds.deep_mean)
     } else if mean >= thresholds.standard_mean {
-        format!(
-            "Mean at or above {}; no axis reaches {}",
-            thresholds.standard_mean, thresholds.deep_axis
+        crate::tr!(
+            "Mean at or above {value0}; no axis reaches {value1}",
+            value0 = thresholds.standard_mean,
+            value1 = thresholds.deep_axis
         )
     } else {
-        format!(
-            "Mean below {}; no axis reaches {}",
-            thresholds.standard_mean, thresholds.deep_axis
+        crate::tr!(
+            "Mean below {value0}; no axis reaches {value1}",
+            value0 = thresholds.standard_mean,
+            value1 = thresholds.deep_axis
         )
     }
 }
@@ -142,11 +144,11 @@ fn file_summary(axis: Axis, item: &Evidence) -> Option<Div> {
     let detail = item.detail.as_str();
     Some(match axis {
         Axis::TestGap if item.contribution > 0. => pair(
-            badge("untested", WARNING),
+            badge(crate::i18n::t("untested"), WARNING),
             count(item.contribution as usize, "added line", "added lines"),
         ),
         Axis::TestGap => pair(
-            badge("tested", SUCCESS),
+            badge(crate::i18n::t("tested"), SUCCESS),
             detail
                 .strip_prefix("Tests changed ")
                 .unwrap_or(detail)
@@ -157,7 +159,7 @@ fn file_summary(axis: Axis, item: &Evidence) -> Option<Div> {
             None => note(detail.into()),
         },
         Axis::Complexity => div().flex_shrink_0().child(badge(
-            format!("{:+} CCN", item.contribution),
+            crate::tr!("{value0} CCN", value0 = format!("{:+}", item.contribution)),
             if item.contribution > 0. {
                 WARNING
             } else {
@@ -336,9 +338,9 @@ impl Cockpit {
         mrde_core::scoring::sort_queue(&mut self.queue, self.config.mr_sort, chrono::Utc::now());
         self.stats = Some((id.clone(), report.stats.clone()));
         self.presentation_revision += 1;
-        self.status = format!(
-            "Risk profile ready · {}/9 axes · unavailable axes are excluded from the mean.",
-            report.profile.available()
+        self.status = crate::tr!(
+            "Risk profile ready · {value0}/9 axes · unavailable axes are excluded from the mean.",
+            value0 = report.profile.available()
         );
         for message in &report.setup_messages {
             self.log(message);
@@ -361,8 +363,8 @@ impl Cockpit {
             .gap_4()
             .min_w_0()
             .child(heading(
-                "Changes",
-                Some("Risk profile · changed files · owners and history".into()),
+                crate::i18n::t("Changes"),
+                Some(crate::i18n::t("Risk profile · changed files · owners and history").into()),
             ));
         match report {
             Some(report) => {
@@ -383,10 +385,10 @@ impl Cockpit {
                     card()
                         .debug_selector(|| "risk-prompt".into())
                         .child(muted(
-                            "Calculate an explainable risk profile of this commit: size, files, complexity, tests, sensitive paths, coupling, warnings, debt, and ticket age.",
+                            crate::i18n::t("Calculate an explainable risk profile of this commit: size, files, complexity, tests, sensitive paths, coupling, warnings, debt, and ticket age."),
                         ))
                         .child(muted(
-                            "It runs locally in the MR worktree (created if missing). Missing tools leave an axis n/a, never zero. Claude never starts automatically.",
+                            crate::i18n::t("It runs locally in the MR worktree (created if missing). Missing tools leave an axis n/a, never zero. Claude never starts automatically."),
                         ))
                         .child(div().flex().gap_2().flex_wrap().child(self.calculate_button(cx)).child(self.setup_tools_button(cx))),
                 );
@@ -405,9 +407,9 @@ impl Cockpit {
 
     fn setup_tools_button(&self, cx: &mut Context<Self>) -> AnyElement {
         div().debug_selector(|| "setup-risk-tools".into()).child(
-            Button::new("setup-risk-tools").small().label("Detect and install tools")
+            Button::new("setup-risk-tools").small().label(crate::i18n::t("Detect and install tools"))
                 .disabled(self.is_busy())
-                .tooltip("Detect linters for the changed code, install supported tools, and prepare approved checks. Downloads may be required.")
+                .tooltip(crate::i18n::t("Detect linters for the changed code, install supported tools, and prepare approved checks. Downloads may be required."))
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Some(detail) = this.detail.clone() {
                         this.start(Action::SetupRiskTools(detail), "Detecting and installing risk tools…", cx);
@@ -423,9 +425,9 @@ impl Cockpit {
                 Button::new("calculate-risk")
                     .small()
                     .label(if self.current_risk().is_some() {
-                        "Calculate again"
+                        crate::i18n::t("Calculate again")
                     } else {
-                        "Calculate risk"
+                        crate::i18n::t("Calculate risk")
                     })
                     .disabled(self.is_busy())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -449,7 +451,7 @@ impl Cockpit {
                     Button::new("update-baseline")
                         .small()
                         .ghost()
-                        .label("Update team median")
+                        .label(crate::i18n::t("Update team median"))
                         .disabled(self.is_busy())
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(detail) = this.detail.clone() {
@@ -475,18 +477,18 @@ impl Cockpit {
                     .flex()
                     .items_center()
                     .gap_3()
-                    .child(badge("proposed", WARNING))
+                    .child(badge(crate::i18n::t("proposed"), WARNING))
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
                             .text_color(rgb(INK))
-                            .child(format!("Proposed check: {}", pending.id)),
+                            .child(crate::tr!("Proposed check: {value0}", value0 = pending.id)),
                     )
                     .child(
                         Button::new(SharedString::from(format!("allow-risk-{key}")))
                             .xsmall()
-                            .label("Allow, install and calculate")
+                            .label(crate::i18n::t("Allow, install and calculate"))
                             .disabled(self.is_busy())
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if let Some(detail) = this.detail.clone() {
@@ -500,10 +502,10 @@ impl Cockpit {
                     ),
             )
             .child(code(pending.command.join(" "), INK))
-            .when(!pending.directory.is_empty(), |card| card.child(muted(format!("Package: {}", pending.directory))))
-            .when_some(pending.preparation.clone(), |card, preparation| card.child(muted(format!("Dependency setup: {preparation}. Locked dependencies are prepared in isolated snapshots; downloads may be required."))))
+            .when(!pending.directory.is_empty(), |card| card.child(muted(crate::tr!("Package: {value0}", value0 = pending.directory))))
+            .when_some(pending.preparation.clone(), |card, preparation| card.child(muted(crate::tr!("Dependency setup: {preparation}. Locked dependencies are prepared in isolated snapshots; downloads may be required.", preparation = preparation))))
             .child(muted(
-                "It runs without a shell in disposable snapshots of the base and head commits, only after you allow this exact command.",
+                crate::i18n::t("It runs without a shell in disposable snapshots of the base and head commits, only after you allow this exact command."),
             ))
             .into_any_element()
     }
@@ -528,7 +530,7 @@ impl Cockpit {
             .axes
             .iter()
             .filter(|a| a.score.is_none())
-            .map(|a| a.axis.label())
+            .map(|a| crate::i18n::t(a.axis.label()))
             .collect();
         let legend = |swatch: Div, text: String| {
             div()
@@ -571,11 +573,11 @@ impl Cockpit {
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(rgb(color))
                             .child(match verdict {
-                                Some(v) => format!("{} review", v.label()),
+                                Some(v) => crate::tr!("{value0} review", value0 = crate::i18n::t(v.label())),
                                 None => "Review depth unknown".into(),
                             }),
                     )
-                    .when(partial, |row| row.child(badge("partial", SUBTLE))),
+                    .when(partial, |row| row.child(badge(crate::i18n::t("partial"), SUBTLE))),
             )
             .child(
                 div()
@@ -594,18 +596,12 @@ impl Cockpit {
                             .pb_1()
                             .text_size(px(13.))
                             .text_color(rgb(SUBTLE))
-                            .child(format!(
-                                "/ 10 · mean of {} axes",
-                                profile.available()
-                            )),
+                            .child(crate::tr!("/ 10 · mean of {value0} axes", value0 = profile.available())),
                     ),
             )
             .child(muted(reason(profile, thresholds)))
             .when(partial, |info| {
-                info.child(muted(format!(
-                    "Not measured: {}. Unknown axes are left out of the mean, never counted as zero.",
-                    missing.join(", ")
-                )))
+                info.child(muted(crate::tr!("Not measured: {value0}. Unknown axes are left out of the mean, never counted as zero.", value0 = missing.join(", "))))
             })
             .child(
                 div()
@@ -615,13 +611,13 @@ impl Cockpit {
                     .gap_1()
                     .child(legend(
                         div().w(px(16.)).h(px(2.)).bg(rgb(INFO)),
-                        "This MR".into(),
+                        crate::i18n::t("This MR").into(),
                     ))
                     .child(legend(
                         dashes,
                         match baseline {
-                            Some(b) => format!("Team median of {} merged MRs", b.merged_mrs),
-                            None => "Team median: not measured yet".into(),
+                            Some(b) => crate::tr!("Team median of {value0} merged MRs", value0 = b.merged_mrs),
+                            None => crate::i18n::t("Team median: not measured yet").into(),
                         },
                     ))
                     .child(legend(
@@ -630,46 +626,39 @@ impl Cockpit {
                             .rounded_full()
                             .border_1()
                             .border_color(rgb(ERROR)),
-                        format!("Deep-review threshold ({})", thresholds.deep_axis),
+                        crate::tr!("Deep-review threshold ({value0})", value0 = thresholds.deep_axis),
                     )),
             );
         match baseline {
             Some(b) => {
-                info = info.child(muted(format!("Median saved {} · updates reuse unchanged commit profiles",
-                    b.computed_at.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M"))));
+                info = info.child(muted(crate::tr!("Median saved {value0} · updates reuse unchanged commit profiles", value0 = b.computed_at.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M"))));
                 // Axes never measured (no lint command, say) are already n/a.
                 let fewest = b.samples.iter().copied().filter(|n| *n > 0).min();
                 if let Some(fewest) = fewest.filter(|n| *n < b.merged_mrs) {
-                    info = info.child(muted(format!(
-                        "Each axis is measured on {fewest} to {} of them.",
-                        b.samples.iter().copied().max().unwrap_or_default()
-                    )));
+                    info = info.child(muted(crate::tr!("Each axis is measured on {fewest} to {value0} of them.", fewest = fewest, value0 = b.samples.iter().copied().max().unwrap_or_default())));
                 }
                 if !b.warnings.is_empty() {
                     info = info.child(
                         div()
                             .text_size(px(12.))
                             .text_color(rgb(WARNING))
-                            .child(format!(
-                                "{} unavailable historical measurements: see Debug logs.",
-                                b.warnings.len()
-                            )),
+                            .child(crate::tr!("{value0} unavailable historical measurements: see Debug logs.", value0 = b.warnings.len())),
                     );
                 }
             }
             None => {
                 info = info.child(muted(
-                    "Update team median measures uncached merged MRs locally and saves the results. Later updates reuse unchanged commit profiles.",
+                    crate::i18n::t("Update team median measures uncached merged MRs locally and saves the results. Later updates reuse unchanged commit profiles."),
                 ))
             }
         }
-        info = info.child(muted(format!(
-            "Measured {} at {}",
-            profile
+        info = info.child(muted(crate::tr!(
+            "Measured {value0} at {value1}",
+            value0 = profile
                 .computed_at
                 .with_timezone(&chrono::Local)
                 .format("%Y-%m-%d %H:%M"),
-            profile.head_sha.chars().take(8).collect::<String>()
+            value1 = profile.head_sha.chars().take(8).collect::<String>()
         )));
         let mut rows = div()
             .debug_selector(|| "risk-axes".into())
@@ -760,8 +749,9 @@ impl Cockpit {
                 .child(ellipsis(
                     score
                         .unavailable
-                        .clone()
-                        .unwrap_or_else(|| "Not measured".into()),
+                        .as_deref()
+                        .map(crate::i18n::text)
+                        .unwrap_or_else(|| crate::i18n::t("Not measured").into()),
                 ))
                 .into_any_element(),
         };
@@ -784,7 +774,7 @@ impl Cockpit {
                     .flex_shrink_0()
                     .text_size(px(13.))
                     .text_color(rgb(if selected { HEADING } else { INK }))
-                    .child(axis.label()),
+                    .child(crate::i18n::t(crate::i18n::t(axis.label()))),
             )
             .child(
                 div()
@@ -833,7 +823,7 @@ impl Cockpit {
                 .xsmall()
                 .ghost()
                 .icon(Icon::new(IconName::Bot).text_color(rgb(CLAUDE)))
-                .label("Ask Claude about this axis")
+                .label(crate::i18n::t("Ask Claude about this axis"))
                 .disabled(busy)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(detail) = this.detail.clone() {
@@ -857,7 +847,7 @@ impl Cockpit {
                         .text_size(px(15.))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(rgb(HEADING))
-                        .child(axis.label()),
+                        .child(crate::i18n::t(crate::i18n::t(axis.label()))),
                 )
                 .child(badge(
                     score.score.map_or("n/a".into(), |s| format!("{s:.1} / 10")),
@@ -871,7 +861,9 @@ impl Cockpit {
                             .text_color(rgb(SUBTLE))
                             .child(raw_text(raw)),
                     )
-                    .when(raw.estimated, |row| row.child(badge("estimate", SUBTLE)))
+                    .when(raw.estimated, |row| {
+                        row.child(badge(crate::i18n::t("estimate"), SUBTLE))
+                    })
                 })
                 .child(div().flex_1())
                 .child(div().flex_shrink_0().child(ask))
@@ -881,7 +873,7 @@ impl Cockpit {
                             .xsmall()
                             .ghost()
                             .icon(IconName::Close)
-                            .tooltip("Close")
+                            .tooltip(crate::i18n::t("Close"))
                             .on_click(
                                 cx.listener(move |this, _, _, cx| this.toggle_risk_axis(axis, cx)),
                             ),
@@ -893,8 +885,9 @@ impl Cockpit {
                 .child(muted(
                     score
                         .unavailable
-                        .clone()
-                        .unwrap_or_else(|| "Not measured".into()),
+                        .as_deref()
+                        .map(crate::i18n::text)
+                        .unwrap_or_else(|| crate::i18n::t("Not measured").into()),
                 ))
                 .into_any_element();
         };
@@ -924,9 +917,9 @@ impl Cockpit {
         });
         if groups.is_empty() {
             return section
-                .child(muted(
+                .child(muted(crate::i18n::t(
                     "No findings: nothing in this change raises this axis.",
-                ))
+                )))
                 .into_any_element();
         }
         let mut list = div()
@@ -1001,9 +994,10 @@ impl Cockpit {
         }
         section = section.child(list);
         if raw.evidence.len() > shown {
-            section = section.child(muted(format!(
-                "Showing {shown} of {} findings",
-                raw.evidence.len()
+            section = section.child(muted(crate::tr!(
+                "Showing {shown} of {value0} findings",
+                shown = shown,
+                value0 = raw.evidence.len()
             )));
         }
         section.into_any_element()
@@ -1074,7 +1068,7 @@ impl Cockpit {
                 .map(|(axis, n, color)| badge(chip(*axis, *n), *color).into_any_element())
                 .collect();
             if report.is_some_and(|r| r.excluded.contains(&file.new_path)) {
-                marks.push(badge("not scored", SUBTLE).into_any_element());
+                marks.push(badge(crate::i18n::t("not scored"), SUBTLE).into_any_element());
             }
             let path = file.new_path.clone();
             list = list.child(
@@ -1095,9 +1089,9 @@ impl Cockpit {
             }
         }
         if files.len() > LISTED {
-            list = list.child(div().pt_2().child(muted(format!(
-                "{} smaller files are in the Files tab.",
-                files.len() - LISTED
+            list = list.child(div().pt_2().child(muted(crate::tr!(
+                "{value0} smaller files are in the Files tab.",
+                value0 = files.len() - LISTED
             ))));
         }
         div()
@@ -1106,10 +1100,10 @@ impl Cockpit {
             .gap_2()
             .min_w_0()
             .child(heading(
-                "Changed files",
-                Some(format!(
-                    "{} · largest first · click a file for its owners and history",
-                    count(files.len(), "file", "files")
+                crate::i18n::t("Changed files"),
+                Some(crate::tr!(
+                    "{value0} · largest first · click a file for its owners and history",
+                    value0 = count(files.len(), "file", "files")
                 )),
             ))
             .child(list)
@@ -1181,7 +1175,7 @@ impl Cockpit {
                         .id(SharedString::from(format!("file-axis-{}", axis.id())))
                         .cursor_pointer()
                         .child(badge(
-                            format!("{} · {n}", axis.label()),
+                            format!("{} · {n}", crate::i18n::t(axis.label())),
                             severity(value, &report.verdict_thresholds),
                         ))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1208,7 +1202,7 @@ impl Cockpit {
             *id == detail.mr.id && *sha == detail.mr.sha && file.path == path
         }) else {
             return panel
-                .child(muted("Loading owners and history…"))
+                .child(muted(crate::i18n::t("Loading owners and history…")))
                 .into_any_element();
         };
         let mut owners = div().flex().flex_wrap().items_center().gap_x_4().gap_y_1();
@@ -1247,7 +1241,7 @@ impl Cockpit {
                 Some("git blame at the MR head".into()),
             ))
             .child(if file.authors.is_empty() {
-                muted("No owner information.").into_any_element()
+                muted(crate::i18n::t("No owner information.")).into_any_element()
             } else {
                 owners.into_any_element()
             });
@@ -1255,9 +1249,10 @@ impl Cockpit {
         panel = panel.child(subheading(
             "Recent commits",
             Some(if mine > 0 {
-                format!(
-                    "{} · {mine} in this MR",
-                    count(file.commits.len(), "commit", "commits")
+                crate::tr!(
+                    "{value0} · {mine} in this MR",
+                    value0 = count(file.commits.len(), "commit", "commits"),
+                    mine = mine
                 )
             } else {
                 count(file.commits.len(), "commit", "commits")
@@ -1288,7 +1283,9 @@ impl Cockpit {
                             .text_color(rgb(SUBTLE))
                             .child(commit.sha.chars().take(8).collect::<String>()),
                     )
-                    .when(commit.in_mr, |row| row.child(badge("this MR", INFO)))
+                    .when(commit.in_mr, |row| {
+                        row.child(badge(crate::i18n::t("this MR"), INFO))
+                    })
                     .child(
                         div()
                             .flex_1()
@@ -1308,7 +1305,7 @@ impl Cockpit {
             );
         }
         panel = panel.child(if file.commits.is_empty() {
-            muted("No commits found for this file.").into_any_element()
+            muted(crate::i18n::t("No commits found for this file.")).into_any_element()
         } else {
             commits.into_any_element()
         });
