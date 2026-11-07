@@ -37,8 +37,13 @@ pub fn environment(cache: Option<&Path>) -> Environment {
     let mut env = Environment::default();
     let fallback = default_cache();
     if let Some(cache) = cache.or(fallback.as_deref()) {
+        let cache = if cache.is_absolute() {
+            cache.to_path_buf()
+        } else {
+            std::env::current_dir().unwrap_or_default().join(cache)
+        };
         for (name, version) in [("lizard", LIZARD), ("ruff", RUFF)] {
-            let root = tool_root(cache, name, version);
+            let root = tool_root(&cache, name, version);
             if root.join("ready").is_file() {
                 env.prepend(root.join("bin"));
             }
@@ -77,30 +82,54 @@ fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|s| (*s).into()).collect()
 }
 
-struct InstallFile(PathBuf);
-impl Drop for InstallFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-
 async fn python_tool(cache: &Path, name: &str, version: &str, env: &mut Environment) -> Result<()> {
     let _guard = INSTALL_LOCK.lock().await;
     let root = tool_root(cache, name, version);
-    if root.join("ready").is_file() && root.join("bin").join(name).is_file() {
+    let managed = root.join("bin").join(name);
+    if root.join("ready").is_file()
+        && managed.is_file()
+        && execute(
+            &format!("Verify {name}"),
+            vec![managed.to_string_lossy().into_owned(), "--version".into()],
+            cache,
+            env,
+            Network::Offline,
+        )
+        .await
+        .is_ok()
+    {
         env.prepend(root.join("bin"));
         return Ok(());
     }
-    // Respect an already-installed user executable, including tools invisible to Finder.
-    if env.find(name, cache).is_some() {
+    // Respect a working user installation; repair a broken managed interpreter locally.
+    if let Some(program) = env.find(name, cache).filter(|p| !p.starts_with(&root))
+        && execute(
+            &format!("Verify {name}"),
+            vec![program.to_string_lossy().into_owned(), "--version".into()],
+            cache,
+            env,
+            Network::Offline,
+        )
+        .await
+        .is_ok()
+    {
         return Ok(());
     }
-    let python = env.find("python3", cache).context("Python 3 is required to prepare radar tools. Install Python, then retry Detect and install tools.")?;
+    let mut host = env.clone();
+    host.directories
+        .retain(|p| !p.starts_with(cache.join("risk-tools")));
+    let python = host.find("python3", cache).context("Python 3 is required to prepare radar tools. Install Python, then retry Detect and install tools.")?;
     std::fs::create_dir_all(&root)?;
-    let lock = root.join("install.lock");
-    std::fs::OpenOptions::new().write(true).create_new(true).open(&lock)
-        .context("This tool is already being installed. Retry after that operation finishes; after a crash, remove its install.lock in the risk-tools cache.")?;
-    let _file = InstallFile(lock);
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join("install.lock"))?;
+    // OS locks release on cancellation or process death; a crash cannot leave setup stuck.
+    lock.try_lock()
+        .context("This tool is already being installed. Retry after that operation finishes.")?;
+    let _ = std::fs::remove_file(root.join("ready"));
     execute(
         "Create isolated radar environment",
         vec![
@@ -233,6 +262,19 @@ pub(crate) async fn dependencies(
 
 /// Called only by an explicit setup action, never by background refresh or `analyze`.
 pub async fn prepare(ctx: &mut MrContext, cache: &Path) {
+    let cache = if cache.is_absolute() {
+        cache.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(directory) => directory.join(cache),
+            Err(error) => {
+                ctx.setup_messages
+                    .push(format!("Tool cache unavailable: {error}"));
+                return;
+            }
+        }
+    };
+    let cache = cache.as_path();
     ctx.environment = environment(Some(cache));
     if let Err(error) = std::fs::create_dir_all(cache) {
         ctx.setup_messages
@@ -349,7 +391,6 @@ esac
         );
         let root = tool_root(&cache, "lizard", LIZARD);
         assert!(!root.join("ready").exists());
-        assert!(!root.join("install.lock").exists());
         std::fs::write(&python, script(false)).unwrap();
         python_tool(&cache, "lizard", LIZARD, &mut env)
             .await
@@ -363,5 +404,14 @@ esac
             "installed\n"
         );
         assert_eq!(env.find("lizard", &cache), Some(root.join("bin/lizard")));
+        // A tool left behind with a broken launcher is repaired on the next setup.
+        std::fs::write(root.join("bin/lizard"), "#!/bin/sh\nexit 7\n").unwrap();
+        python_tool(&cache, "lizard", LIZARD, &mut env)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("bin/install-count")).unwrap(),
+            "installed\ninstalled\n"
+        );
     }
 }
