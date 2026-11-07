@@ -72,5 +72,11 @@ Update this list when the workflow surprises you, and improve the script with it
 - `cargo fmt` reformats whole crates, including another agent's unformatted work from
   the snapshot, which then conflicts at merge time. Format only your files:
   `rustfmt --edition 2024 <files>`, and run `cargo fmt --all --check` after syncing.
+- A branch that began from its own snapshot commit (made by hand, not by `start
+  --from-checkout`) shares no history with the baseline: after one, `sync` conflicted on
+  22 files, every file both snapshots held. Replaying only the branch's own commits left 8.
+  Preview with `git merge-tree --write-tree --name-only --merge-base=<your snapshot> main
+  HEAD`, then `git rebase --onto main <your snapshot>` in your worktree instead of `sync`
+  (agent branches are local, so rebasing them is safe).
 - `target/` is about 30 GB here. `start` clones only `debug/deps`, `debug/build`,
   `debug/.fingerprint`, `tools`, and `zig`, not the 10 GB `debug/incremental`.
