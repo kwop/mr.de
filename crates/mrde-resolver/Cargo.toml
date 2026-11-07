@@ -20,3 +20,6 @@ mrde-git.workspace = true
 mrde-claude.workspace = true
 mrde-store.workspace = true
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
