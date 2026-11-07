@@ -82,6 +82,11 @@ pub struct Cockpit {
     review_level: Option<ReviewLevel>,
     level: ReviewLevel,
     stats: Option<(MrId, DiffStats)>,
+    risk: Option<(MrId, Box<mrde_core::risk::RiskReport>)>,
+    risk_baseline: Option<(MrId, mrde_core::risk::Baseline)>,
+    risk_axis: Option<mrde_core::risk::Axis>,
+    risk_selected_file: Option<String>,
+    risk_file: Option<(MrId, String, mrde_core::risk::FileContext)>,
     /// Invalidates background presentation models after new detail/statistics arrive.
     presentation_revision: u64,
     compliance: Option<(MrId, String, Compliance)>,
@@ -376,6 +381,11 @@ impl Cockpit {
             stats: None,
             presentation_revision: 0,
             compliance: None,
+            risk: None,
+            risk_baseline: None,
+            risk_axis: None,
+            risk_selected_file: None,
+            risk_file: None,
             insights: None,
             tour: None,
             visual: None,
@@ -478,7 +488,12 @@ impl Cockpit {
             | Action::Compliance(d)
             | Action::Analyze(d)
             | Action::Tour(d)
-            | Action::Visual(d) => Some((d.mr.id.clone(), d.mr.sha.clone())),
+            | Action::Visual(d)
+            | Action::Risk(d)
+            | Action::RiskBaseline(d)
+            | Action::RiskFile(d, _)
+            | Action::ApproveRiskCommand(d, _)
+            | Action::AskRisk(d, _, _) => Some((d.mr.id.clone(), d.mr.sha.clone())),
             _ => None,
         };
         self.status = message.into();
@@ -495,6 +510,10 @@ impl Cockpit {
                 | Action::Analyze(_)
                 | Action::Tour(_)
                 | Action::Visual(_)
+                | Action::Risk(_)
+                | Action::RiskBaseline(_)
+                | Action::RiskFile(..)
+                | Action::ApproveRiskCommand(..)
         );
         self.generation += 1;
         let generation = self.generation;
@@ -748,6 +767,19 @@ impl Cockpit {
                     self.queue = queue;
                     self.set_queue_page(self.queue_page);
                 }
+                Ok(Outcome::Risk(id, report)) => self.apply_risk(id, report),
+                Ok(Outcome::RiskBaseline(id, baseline)) => {
+                    for warning in &baseline.warnings {
+                        self.log(warning);
+                    }
+                    self.status =
+                        "Team median updated; unavailable history is excluded per axis.".into();
+                    self.risk_baseline = Some((id, baseline));
+                }
+                Ok(Outcome::RiskFile(id, sha, file)) => {
+                    self.status = "File history loaded.".into();
+                    self.risk_file = Some((id, sha, file));
+                }
                 Ok(Outcome::DetailWith(detail, review, restored)) => {
                     let (id, sha) = (detail.mr.id.clone(), detail.mr.sha.clone());
                     self.insights = restored
@@ -759,6 +791,8 @@ impl Cockpit {
                     {
                         self.stats = Some((id.clone(), stats));
                     }
+                    self.risk = restored.risk.map(|r| (id.clone(), Box::new(r)));
+                    self.risk_baseline = restored.baseline.map(|b| (id.clone(), b));
                     self.tour = restored.tour.map(|t| (id.clone(), sha.clone(), t));
                     self.visual = restored.visual.map(|v| (id.clone(), sha.clone(), v));
                     self.apply_detail(detail, review);
@@ -876,6 +910,23 @@ impl Cockpit {
         self.drive_automation(cx);
     }
     fn apply_detail(&mut self, detail: Box<MrDetail>, review: Option<(ReviewLevel, Review)>) {
+        self.risk_axis = None;
+        self.risk_selected_file = None;
+        self.risk_file = None;
+        if self
+            .risk
+            .as_ref()
+            .is_some_and(|(id, r)| *id != detail.mr.id || r.profile.head_sha != detail.mr.sha)
+        {
+            self.risk = None;
+        }
+        if self
+            .risk_baseline
+            .as_ref()
+            .is_some_and(|(id, _)| id.project != detail.mr.id.project)
+        {
+            self.risk_baseline = None;
+        }
         self.selected_mr = Some(detail.mr.id.clone());
         self.detail_tab = DetailTab::Description;
         self.detail_scroll.set_offset(point(px(0.), px(0.)));
@@ -1501,6 +1552,13 @@ impl Cockpit {
                             } else {
                                 transparent_black()
                             },
+                        ))
+                        .child(radar::miniature(
+                            mr.risk
+                                .as_ref()
+                                .filter(|r| r.head_sha == mr.sha)
+                                .map(|r| r.scores)
+                                .unwrap_or([None; 8]),
                         ))
                         .child(
                             div()
@@ -2228,3 +2286,6 @@ mod worktrees;
 
 #[cfg(test)]
 mod tests;
+
+mod changes;
+mod radar;

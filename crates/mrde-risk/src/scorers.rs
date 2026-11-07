@@ -473,20 +473,22 @@ impl RiskScorer for ComplexityScorer {
     }
     async fn measure(&self, ctx: &MrContext) -> Result<RawMetric> {
         let (before, after) = ctx.snapshot_paths()?;
-        let paths: Vec<_> = ctx
-            .files
-            .iter()
-            .filter(|f| source(f.path()))
-            .map(|f| f.path())
-            .collect();
+        let files: Vec<_> = ctx.files.iter().filter(|f| source(f.path())).collect();
         ensure!(
-            !paths.is_empty(),
+            !files.is_empty(),
             "No supported source files for complexity"
         );
         let mut totals = Vec::new();
-        for root in [&before, &after] {
-            let selected: Vec<_> = paths
+        for (base, root) in [(true, &before), (false, &after)] {
+            let selected: Vec<_> = files
                 .iter()
+                .filter_map(|f| {
+                    if base {
+                        f.old_path.as_deref()
+                    } else {
+                        f.new_path.as_deref()
+                    }
+                })
                 .filter(|p| root.join(p).is_file())
                 .map(|p| format!("./{p}"))
                 .collect();
@@ -500,7 +502,18 @@ impl RiskScorer for ComplexityScorer {
                 "Complexity check failed with exit {:?}",
                 output.code
             );
-            totals.push(crate::reports::complexity(&output.stdout, root)?);
+            let mut values = crate::reports::complexity(&output.stdout, root)?;
+            if base {
+                for file in &files {
+                    if let (Some(old), Some(new)) = (&file.old_path, &file.new_path)
+                        && old != new
+                        && let Some(value) = values.remove(old)
+                    {
+                        values.insert(new.clone(), value);
+                    }
+                }
+            }
+            totals.push(values);
         }
         let mut details = Vec::new();
         let mut delta = 0.;

@@ -8,6 +8,7 @@ use mrde_core::models::MrId;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum DetailTab {
     Description,
+    Changes,
     Structure,
     Files,
     Review,
@@ -18,8 +19,9 @@ pub(super) enum DetailTab {
     Visual,
 }
 impl DetailTab {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::Description,
+        Self::Changes,
         Self::Structure,
         Self::Files,
         Self::Review,
@@ -31,6 +33,7 @@ impl DetailTab {
     ];
     pub(super) fn key(self) -> &'static str {
         match self {
+            Self::Changes => "changes",
             Self::Description => "description",
             Self::Structure => "structure",
             Self::Files => "files",
@@ -44,6 +47,7 @@ impl DetailTab {
     }
     fn label(self) -> &'static str {
         match self {
+            Self::Changes => "Changes",
             Self::Description => "Description",
             Self::Structure => "Structure",
             Self::Files => "Files",
@@ -242,6 +246,7 @@ impl Cockpit {
                 .into_any_element();
         };
         let content = match self.detail_tab {
+            DetailTab::Changes => self.changes_view(detail, window, cx),
             DetailTab::Description => self.description_view(detail, window, cx),
             DetailTab::Files => self.files_view(detail, window, cx),
             DetailTab::Review => self.review_view(window, cx),

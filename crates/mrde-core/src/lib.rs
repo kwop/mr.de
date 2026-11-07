@@ -4,6 +4,6 @@ pub mod insights;
 pub mod models;
 pub mod resolver;
 pub mod review;
+pub mod risk;
 pub mod scoring;
 pub mod stats;
-pub mod risk;
