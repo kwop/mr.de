@@ -266,6 +266,7 @@ async fn analyze_impl(ctx: MrContext) -> RiskReport {
         },
         verdict_thresholds: ctx.config.verdict,
         stats: ctx.stats,
+        excluded: ctx.excluded,
         pending_commands,
     }
 }

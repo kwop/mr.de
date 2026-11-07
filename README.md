@@ -23,9 +23,10 @@ analysis.
   and size, or by date or diff size. Labels come with their GitLab colors, including those of
   the linked ticket when teams label tickets rather than merge requests. Search the queue
   (**⌘K**), filter it by labels from the sidebar, or open any merge request from its link.
-- **Changes and risk radar.** Eight configurable risk axes, a per-axis team median,
-  cached queue miniatures and risk sorting. Select a disktree file to see line ownership,
-  history and findings; axis discussions start Claude only on click.
+- **Changes and risk radar.** Eight configurable, explainable risk axes with the review depth
+  they call for, a per-axis team median, cached queue miniatures and risk sorting. Each axis
+  shows its evidence; each changed file its findings, line owners and history. Axis
+  discussions start Claude only on click.
 - **Review context panel.** Pre-review risks, compliance, analysis findings, the ticket, and
   approvals beside the reader; collapsible to a rail of counters (**⌘⌥B**).
 - **Reader.** Markdown descriptions with tables, images from GitLab uploads, and Mermaid

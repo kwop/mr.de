@@ -268,6 +268,9 @@ pub struct RiskReport {
     pub profile: RiskProfile,
     pub verdict_thresholds: VerdictThresholds,
     pub stats: crate::models::DiffStats,
+    /// Changed paths no axis counts: lockfiles, generated or vendored code, `exclude` globs.
+    #[serde(default)]
+    pub excluded: Vec<String>,
     pub pending_commands: Vec<PendingCommand>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
