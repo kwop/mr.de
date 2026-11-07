@@ -155,3 +155,22 @@ Set `MRDE_TERMINAL_INPUT=1` to dispatch `ok` and Enter through GPUI; a native ca
 show `Received: ok`. `MRDE_TERMINAL_NAVIGATE=1` switches to Settings after input, allowing a
 second capture to check that the native terminal does not cover the new page. Both flags
 operate only in UI preview. No Claude installation or GitLab credentials are used.
+
+## Product contracts and UI reference
+
+Behavioral contracts live in [`specs/features/`](../specs/features/), with stable scenario IDs
+and a [map to existing Rust tests](../specs/coverage.md). They are specifications awaiting
+step bindings, not an additional passing test suite. Install `specs/requirements.txt` in a
+development virtual environment and run `python scripts/check_specs.py` to validate them.
+
+The [native story catalog](../specs/ui/README.md) reuses the real GPUI preview:
+
+```sh
+python3 scripts/ui_catalog.py list
+python3 scripts/ui_catalog.py open risk.partial
+python3 scripts/ui_catalog.py capture reader.history-bottom image.zoom risk.partial
+```
+
+Captures go to a fresh temporary directory and are candidates for review, never silently
+updated golden images. Keep new stories linked to relevant Gherkin IDs; validate behavior
+with the GPUI test platform in addition to inspecting native captures.
