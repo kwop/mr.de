@@ -1,0 +1,8 @@
+Source: gpui-libghostty 0.3.1 src/adapter.rs (MIT), https://github.com/behzade/gpui-libghostty.
+Only the GPUI binding macro is copied. Native code, Ghostty, and its build remain the
+pinned crates.io dependency; they are not forked here.
+
+GPUI 0.2.2 FocusHandle::focus takes only Window; upstream's newer GPUI revision takes
+Window and Context. Three focus calls use the 0.2.2 signature. All native-surface safety
+and lifetime handling remain upstream's code. Remove this adapter when upstream supports
+this GPUI release or MR.DE upgrades to the newer GPUI signature.

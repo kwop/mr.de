@@ -2,7 +2,7 @@
 use super::{Cockpit, label_chip, pipeline_dot};
 use crate::{backend::Action, theme::*};
 use gpui::{prelude::*, *};
-use gpui_component::{Disableable, IconName, Sizable, button::*};
+use gpui_component::{Disableable, IconName, Sizable, button::*, scroll::Scrollbar};
 use mrde_core::models::MrId;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -88,7 +88,7 @@ impl Cockpit {
         self.detail_scroll.set_offset(point(px(0.), px(0.)));
     }
     pub(super) fn open_mr(&mut self, id: MrId, cx: &mut Context<Self>) {
-        if self.is_busy() || self.confirm {
+        if self.initializing || self.confirm {
             return;
         }
         self.selected_mr = Some(id.clone());
@@ -98,12 +98,15 @@ impl Cockpit {
         self.show_detail_tab(DetailTab::Description);
         self.start(Action::Select(id), "Loading MR details…", cx);
     }
+    /// Position of the open MR among the queue entries matching the filters.
     fn selected_position(&self) -> Option<usize> {
         let id = self
             .selected_mr
             .as_ref()
             .or_else(|| self.detail.as_ref().map(|d| &d.mr.id))?;
-        self.queue.iter().position(|mr| &mr.id == id)
+        self.visible_queue()
+            .iter()
+            .position(|&index| &self.queue[index].id == id)
     }
     fn move_mr(&mut self, offset: isize, cx: &mut Context<Self>) {
         let Some(position) = self
@@ -112,11 +115,11 @@ impl Cockpit {
         else {
             return;
         };
-        let Some(mr) = self.queue.get(position) else {
+        let Some(&index) = self.visible_queue().get(position) else {
             return;
         };
-        let id = mr.id.clone();
-        if self.is_busy() || self.confirm {
+        let id = self.queue[index].id.clone();
+        if self.initializing || self.confirm {
             return;
         }
         if position / super::QUEUE_PAGE_SIZE != self.queue_page {
@@ -125,7 +128,7 @@ impl Cockpit {
         self.open_mr(id, cx);
     }
     pub(super) fn reader_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let locked = self.is_busy() || self.confirm;
+        let locked = self.confirm;
         let position = self.selected_position();
         div()
             .debug_selector(|| "reader-toolbar".into())
@@ -139,6 +142,7 @@ impl Cockpit {
             .gap_3()
             .flex_wrap()
             .bg(rgb(TOOLBAR))
+            .when(self.reader_focused, |bar| bar.rounded_t(px(RADIUS_SHEET)))
             .border_b_1()
             .border_color(rgb(PANEL_LINE))
             .child(
@@ -155,6 +159,7 @@ impl Cockpit {
                                 .label("Close")
                                 .disabled(locked)
                                 .on_click(cx.listener(|this, _, _, cx| {
+                                    this.cancel_navigation();
                                     this.selected_mr = None;
                                     this.detail = None;
                                     this.review = None;
@@ -186,7 +191,9 @@ impl Cockpit {
                                 .icon(IconName::ChevronRight)
                                 .tooltip("Next merge request")
                                 .disabled(
-                                    locked || position.is_none_or(|i| i + 1 >= self.queue.len()),
+                                    locked
+                                        || position
+                                            .is_none_or(|i| i + 1 >= self.visible_queue().len()),
                                 )
                                 .on_click(cx.listener(|this, _, _, cx| this.move_mr(1, cx))),
                         ),
@@ -224,12 +231,10 @@ impl Cockpit {
             .min_w_0()
             .w_full()
             .overflow_y_scroll()
-            .bg(rgb(READING))
-            .px_5()
-            .py_4();
+            .px_5();
         let Some(detail) = &self.detail else {
             return pane
-                .child(if self.is_busy() {
+                .child(if self.navigation_job.is_some() {
                     "Loading merge request…"
                 } else {
                     "Could not load this merge request. Select it again to retry."
@@ -238,14 +243,14 @@ impl Cockpit {
         };
         let content = match self.detail_tab {
             DetailTab::Description => self.description_view(detail, window, cx),
-            DetailTab::Files => self.files_view(detail),
+            DetailTab::Files => self.files_view(detail, window, cx),
             DetailTab::Review => self.review_view(window, cx),
             DetailTab::Statistics => div()
                 .flex()
                 .flex_col()
                 .gap_4()
                 .child(self.statistics_controls(cx))
-                .child(self.disktree_view(detail, cx))
+                .child(self.disktree_view(detail, window, cx))
                 .into_any_element(),
             DetailTab::Structure => self.structure_view(detail, window, cx),
             DetailTab::History => self.history_view(cx),
@@ -260,14 +265,16 @@ impl Cockpit {
                 .child(self.compliance_view(window, cx))
                 .into_any_element(),
         };
+        // A segmented control that hugs its tabs.
         let mut tabs = div()
             .debug_selector(|| "detail-tabs".into())
             .flex()
             .items_center()
             .flex_wrap()
-            .gap_3()
-            .border_b_1()
-            .border_color(rgb(PANEL_LINE));
+            .gap(px(2.))
+            .p(px(3.))
+            .rounded(px(RADIUS_CONTROL))
+            .bg(rgb(QUEUE));
         for tab in DetailTab::ALL {
             let selected = self.detail_tab == tab;
             let risks = self.risk_count();
@@ -293,17 +300,13 @@ impl Cockpit {
             tabs = tabs.child(
                 div()
                     .debug_selector(move || format!("tab-{}", tab.key()))
-                    .border_b(px(2.))
-                    .border_color(if selected {
-                        rgb(INFO).into()
-                    } else {
-                        transparent_black()
-                    })
                     .child(
                         Button::new(SharedString::from(format!("detail-tab-{}", tab.key())))
                             .small()
                             .compact()
                             .ghost()
+                            .rounded(px(RADIUS_CHIP + 1.))
+                            .when(selected, |b| b.bg(rgb(SELECTED)))
                             .label(label)
                             .when_some(count, |b, (n, what)| b.tooltip(format!("{n} {what}")))
                             .disabled(self.confirm)
@@ -315,13 +318,13 @@ impl Cockpit {
                     ),
             );
         }
-        // A centered row whose column grows up to 900pt. With `w_full().max_w().mx_auto()`
-        // GPUI measured the column's children at the pane width (above 900pt), so a title
-        // wrapping only at 900pt kept a one-line height and overlapped the metadata.
+        // A definite preferred width makes Taffy measure wrapped titles at the final
+        // column width. `flex_1().max_w(900)` undercounted their height, leaving the last
+        // History items beyond the scroll limit. The column shrinks on narrow windows.
         let column = div()
             .debug_selector(|| "reading-column".into())
-            .flex_1()
-            .max_w(px(900.))
+            .w(px(900.))
+            .max_w_full()
             .min_w_0()
             .h_auto()
             .flex()
@@ -370,7 +373,7 @@ impl Cockpit {
                         .map(label_chip),
                 ),
             )
-            .child(tabs)
+            .child(div().flex().mt_1().child(tabs))
             .child(
                 // A stretched flex column, not `w_full()` or a block: GPUI 0.2.2 then
                 // resolves descendants' percentage widths against the window, and the
@@ -383,7 +386,24 @@ impl Cockpit {
                     .flex_col()
                     .child(content),
             );
-        pane = pane.child(div().flex().justify_center().child(column));
-        pane.into_any_element()
+        pane = pane.child(
+            div()
+                .flex()
+                .items_start()
+                .flex_shrink_0()
+                .py_4()
+                .justify_center()
+                .child(column),
+        );
+        div()
+            .relative()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .child(pane)
+            .child(Scrollbar::vertical(&self.detail_scroll))
+            .into_any_element()
     }
 }

@@ -84,10 +84,10 @@ pub(super) fn graph_mermaid(graph: &FileGraph) -> String {
 }
 
 impl Cockpit {
-    fn tour_section(&self, detail: &MrDetail, cx: &mut Context<Self>) -> Div {
+    fn tour_section(&self, detail: &MrDetail, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let locked = self.is_busy() || self.confirm;
         let tour = self.current_tour();
-        let stats = self.file_stats(detail);
+        let stats = self.file_stats(detail, window, cx);
         let mut section = div().flex().flex_col().gap_3().child(
             heading(
                 "Guided tour",
@@ -143,7 +143,7 @@ impl Cockpit {
                     div()
                         .max_w(px(260.))
                         .px(px(6.))
-                        .rounded(px(4.))
+                        .rounded(px(RADIUS_CHIP))
                         .bg(rgb(FIELD))
                         .font_family(CODE_FONT)
                         .text_size(px(11.))
@@ -218,7 +218,7 @@ impl Cockpit {
                 .child(
                     div()
                         .debug_selector(|| "tour-diagram".into())
-                        .child(crate::mermaid::element(diagram)),
+                        .child(crate::mermaid::element(diagram, window, cx)),
                 );
         }
         section
@@ -227,7 +227,7 @@ impl Cockpit {
     pub(super) fn structure_view(
         &self,
         detail: &MrDetail,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut view = div()
@@ -236,7 +236,7 @@ impl Cockpit {
             .flex()
             .flex_col()
             .gap_4()
-            .child(self.tour_section(detail, cx));
+            .child(self.tour_section(detail, window, cx));
         let Some(insights) = self.current_insights() else {
             return view
                 .child(heading("Symbols, impact, and file graph", None))
@@ -402,7 +402,11 @@ impl Cockpit {
         } else {
             div()
                 .debug_selector(|| "file-graph".into())
-                .child(crate::mermaid::element(&graph_mermaid(&insights.graph)))
+                .child(crate::mermaid::element(
+                    &graph_mermaid(&insights.graph),
+                    window,
+                    cx,
+                ))
                 .into_any_element()
         });
         view.into_any_element()
@@ -446,6 +450,6 @@ mod tests {
         assert!(source.contains("n0 -. HTTP .-> n1"));
         assert!(source.contains("subgraph g1[\"back\"]"));
         assert!(source.contains("class n1,n2 core"));
-        crate::mermaid::render(&source).expect("the renderer accepts the generated graph");
+        crate::mermaid::render_uncached(&source).expect("the renderer accepts the generated graph");
     }
 }

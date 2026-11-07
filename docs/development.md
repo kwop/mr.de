@@ -3,6 +3,7 @@
 ## Building and checking
 
 ```sh
+python3 scripts/bootstrap-ghostty.py      # Python 3.12+, or install Zig 0.16.0 yourself
 cargo run --locked -p mrde                 # run the application
 cargo fmt --all --check
 cargo check --locked --workspace
@@ -16,6 +17,13 @@ The toolchain is pinned to Rust 1.97.1. `Cargo.lock` is part of the source; upda
 any dependency change. GPUI 0.2.2 and `gpui-component` 0.5.0 are pinned as a compatible pair;
 evaluate upgrades together. GPUI's `runtime_shaders` feature compiles Metal shaders at
 startup, so the separate Metal toolchain download is not needed, but the macOS SDK is.
+
+The embedded terminal pins `gpui-libghostty` 0.3.1, which builds its native Ghostty library
+with Zig 0.16.0. `.cargo/config.toml` selects `scripts/zig.sh`; it prefers the ignored local
+`target/tools/zig/zig`, then a compatible system Zig. An explicit `ZIG` environment variable
+overrides the wrapper. The first build downloads/builds the pinned Ghostty sources and needs
+network access. The adapter's MIT license and compatibility notes live in
+`vendor/mrde-ghostty-adapter/`.
 
 The `dev` profile builds dependencies with `opt-level = 3`: unoptimized GPUI layout and
 Markdown rendering made scrolling lag by hundreds of milliseconds per frame. The first build
@@ -56,11 +64,14 @@ Screen Recording permission, so this works from a terminal or an agent.
 
 | Variable | Effect |
 |---|---|
-| `MRDE_SCENARIO` | `queue`, `detail:<tab>`, `focus:<tab>` (queue hidden), `confirm`, `worktrees`, `settings`, `logs`. Tabs: `description`, `structure`, `files`, `review`, `statistics`, `history`, `risks`, `checks`, `visual`. |
+| `MRDE_SCENARIO` | `queue`, `detail:<tab>`, `focus:<tab>` (queue hidden), `confirm`, `worktrees`, `settings`, `logs`, `threads`, `threads:terminal`, `ask` (a questions thread with the local preview shell), `open` (the "Open MR…" dialog). Tabs: `description`, `structure`, `files`, `review`, `statistics`, `history`, `risks`, `checks`, `visual`. |
 | `MRDE_SCENARIO_MR` | Demo merge request to open, for example `244` (180 files). Default `231`. |
 | `MRDE_SCENARIO_FRESH` | Show the tabs before any analysis, tour, or screenshots. |
 | `MRDE_SCENARIO_RISK` | Color the Disktree by risk. |
 | `MRDE_SCENARIO_SCROLL` | Scroll the reader down by this many points. |
+| `MRDE_SCENARIO_CONTEXT` | Pin the review context panel: `docked`, `overlay`, `rail`, or `closed`, whatever the window width. |
+| `MRDE_SCENARIO_SEARCH` | Text typed in the title bar search. |
+| `MRDE_SCENARIO_LABEL` | A label selected in the sidebar filters, for example `billing`. |
 | `MRDE_SNAPSHOT` | Output PNG path; captured after `MRDE_SNAPSHOT_DELAY_MS` (default 2500). |
 | `MRDE_WINDOW` | Window size such as `1400x900` (minimum 1100×720; a window manager may override it). |
 
@@ -77,7 +88,7 @@ To compare with real data, the application itself can be captured with the expli
 `MRDE_SNAPSHOT_REAL=1` opt-in (without `--ui-preview`). It uses the saved credentials for
 read-only requests: it waits for the startup refresh, opens the merge request at
 `MRDE_SCENARIO_INDEX` (default 0) and selects the tab, or opens `worktrees` or `settings`,
-then captures once that screen is ready. It never starts reviews, analyses, Discuss,
+then captures once that screen is ready. It never starts reviews, analyses, Ask Claude,
 approvals, or saves. These captures contain real merge requests: keep them private.
 
 Inspect screenshots after any layout change: unit tests do not catch clipped text, squeezed
@@ -98,11 +109,22 @@ Found with the screenshot harness, with the workarounds used in this code base:
   stretch with `min_w_0()` over `w_full()`.
 - `w_full().max_w(..).mx_auto()` measured a column's children at the parent's width before
   the maximum applied: a title wrapping only at the maximum kept a one-line height and
-  overlapped the next line. The reading column is a child of a centered row with
-  `flex_1().max_w(..)`, and long titles use `paragraph()` (`src/paragraph.rs`), whose
-  measured and painted line breaks come from the same width.
+  overlapped the next line. `flex_1().max_w(..)` also undercounted wrapped-title height,
+  leaving History's last items beyond the scroll limit. The centered reading column uses
+  `w(px(900.)).max_w_full()` to measure at its final width; vertical padding belongs to
+  the scrolling content. Long titles use `paragraph()` (`src/paragraph.rs`). Regression
+  tests check the last History item at multiple widths, with and without the queue.
 - `img` replaces an `auto` height with the image's natural height when its width shrinks.
   Mermaid diagrams use a measured element that fits the width and keeps the aspect ratio.
+- `overflow_hidden()` clips children to a rectangle, not to rounded corners: a child with
+  its own background paints over its parent's rounded corners. Children touching a corner
+  of a rounded sheet round themselves (`rounded_t`, `rounded_b`), and scrolled rows stop a
+  few points above the bottom corners.
+- `window.window_handle().update(..)` fails inside an action dispatched by a keystroke,
+  because the window is busy: global shortcut handlers use `cx.defer`.
+- A single-line `Input` propagates **Enter**; an unhandled keystroke then reaches the input
+  handler, and the test platform inserts a newline that panics text shaping. Handle
+  `input::Enter` on an ancestor instead of only subscribing to `PressEnter`.
 - In tests, `debug_bounds` keeps selectors from earlier frames: assert absence only for
   elements never rendered, otherwise check the state behind them.
 - To debug a layout, add a temporary GPUI test that calls `cx.debug_bounds(selector)`, or
@@ -114,9 +136,22 @@ Found with the screenshot harness, with the workarounds used in this code base:
 `gpui-component` 0.5.0 (Apache-2.0), used through `[patch.crates-io]`. Local changes, listed
 in [`MRDE-PATCH.txt`](../vendor/gpui-component/MRDE-PATCH.txt):
 
+- initial Markdown parsing/highlighting runs in the background, with ordered updates;
 - an opt-in image-click callback for Markdown images;
 - list items keep their width (upstream rendered empty bullets);
 - table cells share the width and wrap instead of being clipped;
 - Markdown blocks keep their spacing, so headings no longer touch the paragraph above.
 
 Remove these patches once a compatible upstream release fixes the same problems.
+
+## Resolver and terminal verification
+
+Resolver tests use injected effects, local temporary Git repositories, Wiremock job traces,
+and a fake streaming Claude executable. They cover conflicts, lease rejection, exact-SHA
+pipeline tracking, questions, the three-attempt cap, Stop/Resume, stale updates, and relaunch.
+
+`MRDE_SCENARIO=threads:terminal` opens a real embedded PTY with a harmless local shell.
+Set `MRDE_TERMINAL_INPUT=1` to dispatch `ok` and Enter through GPUI; a native capture should
+show `Received: ok`. `MRDE_TERMINAL_NAVIGATE=1` switches to Settings after input, allowing a
+second capture to check that the native terminal does not cover the new page. Both flags
+operate only in UI preview. No Claude installation or GitLab credentials are used.

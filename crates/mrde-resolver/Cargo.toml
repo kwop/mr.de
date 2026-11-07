@@ -1,0 +1,22 @@
+[package]
+name = "mrde-resolver"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+mrde-core.workspace = true
+mrde-forge.workspace = true
+mrde-git.workspace = true
+mrde-claude.workspace = true
+mrde-store.workspace = true
+uuid = { version = "1", features = ["v4"] }

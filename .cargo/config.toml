@@ -1,0 +1,3 @@
+[env]
+# Select a compatible local Zig without replacing the system installation.
+ZIG = { value = "scripts/zig.sh", relative = true, force = false }

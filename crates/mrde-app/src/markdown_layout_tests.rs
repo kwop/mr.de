@@ -59,9 +59,12 @@ fn setup(
     let root = window.root(cx).unwrap();
     let mut visual = VisualTestContext::from_window(*window, cx);
     visual.simulate_resize(size(px(360.), px(220.)));
-    visual.draw(point(px(0.), px(0.)), size(px(360.), px(220.)), |_, _| {
-        root.clone()
-    });
+    for _ in 0..4 {
+        visual.draw(point(px(0.), px(0.)), size(px(360.), px(220.)), |_, _| {
+            root.clone()
+        });
+        visual.run_until_parked();
+    }
     (root, visual)
 }
 
@@ -174,4 +177,17 @@ fn code_diagram_and_prose_keep_their_own_vertical_space(cx: &mut TestAppContext)
         tail.origin.y >= doc.bottom(),
         "Mixed documents must keep their full content height"
     );
+}
+
+#[gpui::test]
+fn long_documents_use_a_bounded_virtualized_viewport(cx: &mut TestAppContext) {
+    let (_, mut visual) = setup(
+        cx,
+        "A paragraph with enough text to require layout.\n\n".repeat(1000),
+        true,
+    );
+    let document = visual.debug_bounds("fixture-document").unwrap();
+    assert!(document.size.height >= px(500.) && document.size.height <= px(530.));
+    let tail = visual.debug_bounds("fixture-tail").unwrap();
+    assert!(tail.origin.y >= document.bottom());
 }

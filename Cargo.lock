@@ -2401,6 +2401,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-libghostty"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b12d0d271cf0ca99a9073bdc148ce43782713c6d01be33af2a105b00c62ef5d"
+dependencies = [
+ "async-channel 2.5.0",
+ "image",
+ "khronos-egl",
+ "libc",
+ "libloading",
+ "raw-window-handle",
+ "tempfile",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols 0.32.13",
+]
+
+[[package]]
 name = "gpui-macros"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3705,10 +3723,14 @@ dependencies = [
  "mrde-claude",
  "mrde-core",
  "mrde-forge",
+ "mrde-ghostty-adapter",
  "mrde-git",
  "mrde-insights",
+ "mrde-resolver",
+ "mrde-risk",
  "mrde-store",
  "png 0.18.1",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
@@ -3723,8 +3745,11 @@ name = "mrde-checks"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "nix 0.29.0",
  "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
  "toml 0.8.23",
 ]
 
@@ -3773,6 +3798,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mrde-ghostty-adapter"
+version = "0.1.0"
+dependencies = [
+ "gpui-libghostty",
+]
+
+[[package]]
 name = "mrde-git"
 version = "0.1.0"
 dependencies = [
@@ -3804,13 +3836,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "mrde-resolver"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "mrde-claude",
+ "mrde-core",
+ "mrde-forge",
+ "mrde-git",
+ "mrde-store",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "mrde-risk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "globset",
+ "mrde-checks",
+ "mrde-core",
+ "mrde-git",
+ "mrde-insights",
+ "quick-xml",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "mrde-store"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "core-foundation 0.10.0",
  "keyring",
  "mrde-core",
  "rusqlite",
+ "security-framework 3.7.0",
  "serde",
  "serde_json",
 ]

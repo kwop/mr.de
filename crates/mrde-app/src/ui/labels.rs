@@ -1,5 +1,5 @@
 //! GitLab colors are authoritative; scoped values use a white adjoining segment.
-use crate::theme::{FIELD, INK, OneLine};
+use crate::theme::{FIELD, INK, OneLine, RADIUS_CHIP};
 use gpui::{Div, div, prelude::*, px, rgb};
 use mrde_core::models::Label;
 
@@ -55,6 +55,11 @@ fn colors(label: &Label) -> (u32, u32, u32) {
     };
     (background, foreground, value)
 }
+/// The label's own color, for small swatches.
+pub(super) fn swatch(label: &Label) -> u32 {
+    colors(label).0
+}
+
 /// Priority labels (`P0`, `P::1`) first, the others in their original order.
 pub(super) fn display_order<'a>(labels: impl Iterator<Item = &'a Label>) -> Vec<&'a Label> {
     let mut labels: Vec<&Label> = labels.collect();
@@ -67,7 +72,7 @@ pub(super) fn label_chip(label: &Label) -> Div {
     let pill = div()
         .flex()
         .flex_shrink_0()
-        .rounded(px(4.))
+        .rounded(px(RADIUS_CHIP))
         .overflow_hidden()
         .border_1()
         .border_color(rgb(background))

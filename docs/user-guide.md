@@ -3,51 +3,83 @@
 - [Configuration](#configuration)
 - [Review workflow](#review-workflow)
 - [Queue, labels, and priority](#queue-labels-and-priority)
+- [Search, label filters, and opening any merge request](#search-label-filters-and-opening-any-merge-request)
 - [Reader](#reader)
+- [Review context panel](#review-context-panel)
 - [Pre-review with Claude](#pre-review-with-claude)
 - [Understanding complex merge requests](#understanding-complex-merge-requests)
 - [Specification compliance](#specification-compliance)
 - [Visual comparison](#visual-comparison)
-- [Discuss](#discuss)
+- [Ask Claude](#ask-claude)
 - [Approval](#approval)
 - [Worktrees and cache](#worktrees-and-cache)
 - [Debug logs](#debug-logs)
 
 ## Configuration
 
-Open **Settings**, enter your GitLab base URL and personal access token, and optionally the
-two Cloudflare Access service-token fields. **Test connection** validates authentication
-without saving anything. **Save** persists the settings without any network request. Both
-actions show their progress and result inline; secret inputs stay masked and are never
-cleared. The token needs API access to read merge requests and issues and to approve, which
-is typically the `api` scope. SSH access for Git is independent of the token.
+A project is a review workspace: one provider, connection, optional group, and independent
+review preferences. Use the **PROJECT** selector above the sidebar menus to switch projects,
+or choose **New project**. Name it, select a provider, enter its URL, and click **Save**.
+Rename or edit the selected project in **Project settings**. Switching discards unsaved form
+edits and clears secret inputs; saving keeps their masked values visible.
 
-A blank secret field keeps the saved value for that instance. **Remove saved Cloudflare
-credentials** clears the Cloudflare pair explicitly. Credentials are stored under the `mrde`
-service in the macOS Keychain, never in TOML or SQLite.
+**GitLab** is operational. **GitHub** profiles can be created and saved, but their connector,
+pull requests, and connection testing are not implemented yet. They do not trigger requests.
+For GitLab, **Group / organization** optionally limits the queue to a group and its subgroups
+(e.g. `team/platform`); empty means all accessible groups. This is a queue filter, not a
+permission boundary: **Open MR…** can still open other repositories on the same instance.
 
-Non-secret settings live in `~/.config/mrde/config.toml`:
+**Test connection** checks authentication and access to the selected group without saving.
+**Save** writes settings without an HTTP request. Both show progress and errors. A GitLab
+personal access token typically needs `api` scope; SSH access for Git is independent.
+Cloudflare Access service-token fields are optional. A blank secret keeps the value saved
+for **this project**. **Remove saved Cloudflare credentials** explicitly clears that pair.
+Tokens stay in Keychain, never TOML or SQLite; two projects on the same host do not share them.
+See [Touch ID](touch-id.md) for signed builds.
+
+Non-secret configuration lives in `~/.config/mrde/projects.toml`:
 
 ```toml
-gitlab_url = "https://gitlab.example.com"
+version = 1
+active = "platform"
+
+[[projects]]
+id = "platform"
+name = "Platform"
+provider = "gitlab"
+url = "https://gitlab.example.com"
+group = "team/platform"
 refresh_seconds = 120
 claude_path = "claude"
-mr_roles = ["reviewer", "assignee"]   # any of "reviewer", "assignee", "author"
-mr_sort = "priority"                  # "priority", "newest", "oldest", or "smallest"
-spec_path = "~/code/my-project/specs" # optional, used by Check compliance
-visual_command = "pnpm --dir web exec playwright test visual"  # optional
+mr_roles = ["reviewer", "assignee"]
+mr_sort = "priority"
+spec_path = ""
+visual_command = ""
+
+[[projects]]
+id = "community"
+name = "Community"
+provider = "github" # profile only for now
+url = "https://github.com"
+group = "example-org"
 ```
 
-- `claude_path` may be an absolute path.
-- `refresh_seconds` is clamped to at least 30 seconds. The periodic refresh pauses while
-  another operation runs, in Settings, or while an approval confirmation is open.
-- The toolbar above the queue edits `mr_roles` and `mr_sort`; these preferences save
-  immediately, without touching credentials. At least one role stays selected.
-- **Specification folder** sets `spec_path`. `~` is expanded and the folder must exist when
-  saving. Leave it empty to disable the compliance check.
-- **Screenshot command** sets `visual_command`; see [Visual comparison](#visual-comparison).
-
-Restart the application after editing the file by hand.
+- Use stable, unique IDs containing letters, digits, underscores, or hyphens. Renaming a
+  project's display name preserves its credentials and history. Changing its ID creates a
+  different storage identity; changing provider or URL requires its own credentials.
+- An existing `config.toml` is imported as **Default project** (`id = "default"`), retaining
+  credentials and existing caches. The first save or project selection creates `projects.toml`;
+  the legacy file stays untouched and is then ignored. `default` is reserved for that import.
+- **Refresh interval** is seconds, at least 30; **Claude executable** accepts a command or
+  absolute path. Both are editable in the form. The toolbar saves roles and sorting only
+  for the current project, without accessing Keychain.
+- **Specification folder** must exist when saving; empty disables compliance checks.
+  **Screenshot command** configures [visual comparison](#visual-comparison).
+- Queues, worktrees, analyses, and Threads are isolated per project and group. Changing a
+  group does not delete old worktrees. Background reviews and resolver sessions continue in
+  their originating project when you switch; return to it to inspect their results.
+- Restart after editing TOML. To remove a profile, remove its `[[projects]]` table and point
+  `active` to a remaining ID. This does not delete Keychain entries or worktrees.
 
 ## Review workflow
 
@@ -60,7 +92,7 @@ Restart the application after editing the file by hand.
    in **Visual**.
 5. Click **Check compliance** in **Checks** to compare the ticket and the change with your
    specification.
-6. Click **Discuss** to continue in a terminal with Claude Code and the prepared context.
+6. Click **Ask Claude** to ask Claude Code about the merge request in **Threads**.
 7. Click **Approve**, check the merge request and commit in the confirmation, then confirm.
 
 ## Queue, labels, and priority
@@ -90,6 +122,26 @@ and related-issue endpoints return names only, so mr.de colors them from the pro
 (including parent groups), cached for ten minutes per project. A scoped label such as
 `Review::Dev` shows two adjoining segments: the scope in the label color, the value on white.
 
+## Search, label filters, and opening any merge request
+
+The search field in the title bar (**⌘K**) filters the queue as you type. Every word must
+appear in the merge request number (`!231`), title, project, author, or one of its labels,
+ignoring case; descriptions are not searched. **Escape** clears the search.
+
+![Queue filtered by a search and a label](images/search.png)
+
+The sidebar lists the labels of the queue, merge request and ticket labels together, with
+the number of merge requests carrying each: priority labels first, then the most frequent.
+Click labels to keep only the merge requests carrying all of them; **Clear** removes the
+label filters, and **Clear filters** above the queue removes the search as well. Pagination
+and the reader's previous and next arrows follow the filtered list.
+
+**Open MR…** (**⌘O**) opens a merge request outside your queue. Paste its link, for example
+`https://gitlab.example.com/group/project/-/merge_requests/123`, or a reference such as
+`group/project!123`. Links must belong to the configured GitLab instance: others are refused
+before any request. A merge request opened this way stays open across refreshes until it
+gets a new commit.
+
 ## Reader
 
 Selecting a merge request shrinks the queue and opens the reader below it. **Focus** hides
@@ -106,7 +158,11 @@ Images resolve relative to the document's project. GitLab uploads such as
 `/uploads/<secret>/image.png` are downloaded through the authenticated uploads API (GitLab
 17.4 or later), including Cloudflare headers; public HTTP images load without credentials.
 Downloads run in the background, four at a time, up to 10 MiB each. Clicking an image opens
-a viewer that fits the window; **Escape** returns to the same position.
+a viewer that fits the entire image inside the window, preserving its proportions. Use the
+magnifying-glass **Zoom** button to enlarge it, **−** to zoom out, and **Fit** to restore
+the initial view. The percentage is relative to the fitted view. Scroll vertically or
+horizontally with the trackpad, mouse wheel, or scrollbars while zoomed. **Escape** returns
+to the same position in the description.
 
 **Statistics** shows the *Disktree*, a treemap of changed lines per file grouped into zones
 (directories). It is estimated from GitLab diffs at once; **Compute statistics** replaces the
@@ -114,6 +170,33 @@ estimate with exact `git diff --numstat` counts from the merge request worktree.
 analysis, the Disktree can be colored by file risk instead of zone.
 
 ![Disktree colored by risk](images/disktree.png)
+
+## Review context panel
+
+<img src="images/context.png" alt="Review context panel" width="312" align="right">
+
+The panel on the right of the reader summarizes the open merge request:
+
+- **Pre-review**: the three most severe risks found by Claude, with the depth and
+  confidence.
+- **Checks**: the compliance verdict, requirements met, and those met without a test.
+- **Analysis**: breaking changes, contracts to review, risky patterns, major upgrades, and
+  overlapping merge requests.
+- **Ticket**: the ticket the merge request implements, with its labels; click it to open it
+  in GitLab.
+- **Approvals**: the approval count and the commit being reviewed.
+
+Section titles open the matching tab. The panel button in the title bar, the chevron in the
+panel, or **⌘⌥B** shows and hides it. On windows at least 1360 points wide the panel sits
+beside the reader; collapsed, it leaves a rail of icons whose counters show risks, missing
+requirements, analysis findings, and approvals. On narrower windows the panel starts hidden
+and floats over the reader when opened; below 1200 points the rail is hidden too, and a dot
+on the title bar button signals risks or gaps.
+
+The avatar in the title bar shows the GitLab account of the token, identified by the first
+refresh.
+
+<br clear="right">
 
 ## Pre-review with Claude
 
@@ -206,13 +289,54 @@ up to 16 count as unchanged. Each screen shows before, after, and a difference i
 The command comes only from your configuration, never from the repository, and runs only
 when you click. mr.de does not start servers or seed data: your command must do it.
 
-## Discuss
+## Ask Claude
 
-**Discuss** writes the merge request context (description, issues, existing pre-review) to
-`~/Library/Caches/mrde/context/`, outside the worktree, then opens Ghostty in the worktree
-with `claude --add-dir <context dir>` and a fixed first message. Only fixed text and
+**Ask Claude** creates a **Questions** thread and opens Claude Code in the embedded
+terminal of **Threads**, in the merge request's review worktree. mr.de first writes the
+merge request context (description, issues, existing pre-review) to
+`~/Library/Caches/mrde/context/`, outside the worktree, and starts
+`claude --session-id <id> --permission-mode plan --add-dir <context dir>` with a fixed first
+message asking Claude to read it, then wait for your questions. Only fixed text and
 application-built paths reach the command line, so merge request text is never interpreted
 by a shell.
+
+The session is read-only: in plan mode, Claude Code reads and searches the code but does
+not edit it, so the review worktree stays clean for reviews and analyses. Switching mode
+inside Claude Code (Shift+Tab) is your decision. A questions thread never rebases, commits,
+pushes, or follows a pipeline.
+
+Clicking **Ask Claude** again for the same commit returns to the same thread and resumes
+its session (`claude --resume <id> --permission-mode plan`); **Open terminal** in
+**Threads** does the same later. A new commit gets a new thread.
+
+## Super Resolver and Threads
+
+Click **Super Resolver** in the selected MR's action bar to start. This action authorizes
+rebasing and pushing fixes to that MR's source branch. MR.DE checks the selected SHA,
+creates a separate writable worktree, rebases onto the target, and asks Claude to resolve
+conflicts when necessary. Every push uses the expected source SHA as a lease: concurrent
+changes cause a stop, rather than being overwritten. The target branch is never pushed.
+
+The runner polls GitLab every 15 seconds. A failed pipeline supplies the last 40 KB of up
+to five required failed jobs to Claude. Corrections are committed and pushed, then the
+runner follows the new commit's pipeline. Conflicts and pipeline fixes share a limit of
+**three Claude attempts per run**. Questions, permissions, missing pipelines, manual jobs,
+errors, and exhausted attempts stop the loop in **Needs your input**. Nothing approves or
+merges the MR automatically.
+
+Open **Threads** from the left menu. Select a thread for its timeline or a Claude session
+for its output. **Take over** stops automation before opening that same session inside
+MR.DE's native Ghostty terminal. **Open terminal** resumes a stopped session in its worktree
+with `claude --resume`. You can type answers, review permission requests, and make edits.
+Exit Claude or use **Close terminal**, then click **Resume · 3 attempts** to allow another
+bounded run. Manual edits are preserved and committed before the next rebase.
+
+**Stop** preserves worktrees and session IDs. Closing MR.DE stops its automation; persisted
+active threads become **Interrupted** on the next launch and require a manual Resume.
+Navigation and ordinary reviews remain available while a resolver is running. Saving a
+connection change stops existing runs. Ghostty fonts and key bindings follow your Ghostty
+configuration; MR.DE applies its own terminal colors. The embedded terminal does not require
+opening a separate Ghostty window.
 
 ## Approval
 
@@ -226,6 +350,8 @@ project permissions.
 - Cache and history: `~/Library/Caches/mrde/mrde.sqlite3`.
 - Bare repositories and detached worktrees: `~/Library/Caches/mrde/git/<instance hash>/`,
   one worktree per merge request commit.
+- Resolver worktrees: `~/Library/Caches/mrde/resolver/<instance hash>/<thread ID>/`.
+  They are retained for manual continuation and excluded from the review worktree cleaner.
 - Screenshots: `~/Library/Caches/mrde/visual/`.
 
 The **Worktrees** page lists mr.de worktrees with their local-change state. **Clean** removes

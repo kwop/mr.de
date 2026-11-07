@@ -1,5 +1,9 @@
 # MR.DE contributor guide
 
+Several agents work on this repository in parallel. Before editing, start your task in its
+own worktree with the `isolated-worktree` skill (`.agents/skills/isolated-worktree/`); see
+"Parallel Agents" in `AGENTS.md`. The main checkout only receives merges.
+
 ## Product
 
 mr.de is a native Rust/GPUI desktop cockpit for reviewing GitLab merge requests.
@@ -15,13 +19,16 @@ License: MIT.
 - `crates/mrde-git`: dedicated bare repositories, detached worktrees, and read-only Git queries.
 - `crates/mrde-insights`: worktree analysis (symbols, impact, file graph, history, contracts,
   dependencies, patterns) and the screenshot comparison; pure functions plus `analyze()`.
-- `crates/mrde-claude`: Claude Code CLI bridge, strict response parsing, Ghostty launch.
+- `crates/mrde-claude`: Claude Code CLI bridge, strict response parsing, questions context.
 - `crates/mrde-checks`: check definitions, merge rules, standardized result schema; no runner.
+- `crates/mrde-resolver`: bounded repair orchestration, pipeline polling, persisted Threads sessions.
 - `crates/mrde-store`: versioned SQLite persistence and macOS Keychain access.
 
 ## Invariants
 
-- Claude runs only after an explicit Run review, Check compliance, Generate tour, or Discuss action. No automatic AI analysis. Analyze and Capture screenshots also run only on click.
+- Claude runs only after an explicit Run review, Check compliance, Generate tour, Ask Claude, or Super Resolver action. No automatic AI analysis. Analyze and Capture screenshots also run only on click.
+- Super Resolver shares three repair attempts across conflicts and CI failures. Questions stop it. Push only the source branch with an explicit SHA lease; never auto-resume after restart.
+- Stop the headless worker before interactive takeover; hide native terminal surfaces on navigation.
 - Each review level has its own cache entry. Compliance, statistics, analysis, tour, and screenshot results apply only to the commit they were computed for.
 - The screenshot command comes from the user's configuration only, never from the repository or MR content.
 - Analysis uses read-only Git commands on validated SHAs; it never checks out, writes, or runs repository code.
@@ -44,12 +51,14 @@ Keep domain logic independent of GPUI and concrete adapters. Use `ReviewServices
 review orchestration and `Forge` for forge operations. Use typed errors for parsing and
 `anyhow` context at boundaries. Use `tracing` without secrets. Run network/subprocess work
 on the Tokio runtime and send results back to GPUI; do not block the UI on these operations.
-Use `Command` argument arrays, never concatenate shell commands. Keep dependencies and
+Use `Command` argument arrays. The embedded terminal accepts a command string: shell-quote
+only the configured executable and validated session UUID, never MR text. Keep dependencies and
 `Cargo.lock` in sync. The compatible GPUI/widget versions are pinned; evaluate upgrades together.
 
 ## Commands
 
 ```sh
+python3 scripts/bootstrap-ghostty.py  # Zig 0.16.0; bootstrap requires Python 3.12+
 cargo run --locked -p mrde
 cargo fmt --all --check
 cargo check --locked --workspace

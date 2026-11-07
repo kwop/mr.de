@@ -3,6 +3,8 @@
 use mrde_core::models::*;
 
 pub const INSTANCE: &str = "https://gitlab.example.com";
+/// The reviewer using the preview.
+pub const USER: &str = "jordan.lee";
 
 fn label(name: &str, color: &str) -> Label {
     Label {
@@ -135,6 +137,7 @@ pub fn queue() -> Vec<MergeRequest> {
     let mut queue: Vec<MergeRequest> = SPECS
         .iter()
         .map(|spec| MergeRequest {
+            risk: None,
             id: MrId {
                 project: 42,
                 iid: spec.iid,
@@ -373,6 +376,19 @@ pub fn image() -> Vec<u8> {
     r##"<svg xmlns="http://www.w3.org/2000/svg" width="640" height="300"><rect width="640" height="300" rx="12" fill="#26262a"/><rect x="24" y="24" width="592" height="40" rx="6" fill="#33333a"/><text x="44" y="50" font-family="Helvetica" font-size="16" fill="#e6e6e6">Create a schedule</text><rect x="24" y="84" width="280" height="36" rx="6" fill="#3f6ea6"/><text x="44" y="108" font-family="Helvetica" font-size="14" fill="#fff">Monthly · 1st and 15th</text><rect x="24" y="236" width="180" height="40" rx="8" fill="#4dc179"/><text x="44" y="262" font-family="Helvetica" font-size="15" fill="#10241a">Add schedule</text></svg>"##
         .as_bytes()
         .to_vec()
+}
+
+/// A tall screenshot with visible endpoints for image fit/zoom regression previews.
+pub fn portrait_image() -> Vec<u8> {
+    let mut svg = String::from(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="640" height="2400"><rect width="640" height="2400" fill="#eef1f4"/><rect width="640" height="140" fill="#355f89"/><text x="32" y="80" font-family="Helvetica" font-size="32" fill="#ffffff">Image preview · top</text>"##,
+    );
+    for row in 0..10 {
+        let y = 190 + row * 195;
+        svg.push_str(&format!(r##"<rect x="32" y="{y}" width="576" height="160" rx="12" fill="#ffffff"/><text x="56" y="{}" font-family="Helvetica" font-size="28" fill="#28333d">Section {}</text>"##, y + 70, row + 1));
+    }
+    svg.push_str(r##"<rect y="2260" width="640" height="140" fill="#355f89"/><text x="32" y="2340" font-family="Helvetica" font-size="32" fill="#ffffff">Image preview · bottom</text></svg>"##);
+    svg.into_bytes()
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -1,4 +1,5 @@
-//! Check configuration and results. This crate deliberately executes no commands.
+//! Check definitions, results and a bounded executor for locally approved commands.
+pub mod runner;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

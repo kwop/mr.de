@@ -30,16 +30,19 @@ pub enum QueueSort {
     Newest,
     Oldest,
     Smallest,
+    Risk,
 }
 impl QueueSort {
-    pub const ALL: [QueueSort; 4] = [
+    pub const ALL: [QueueSort; 5] = [
         QueueSort::Priority,
         QueueSort::Newest,
         QueueSort::Oldest,
         QueueSort::Smallest,
+        QueueSort::Risk,
     ];
     pub fn label(self) -> &'static str {
         match self {
+            QueueSort::Risk => "Highest risk first",
             QueueSort::Priority => "Priority",
             QueueSort::Newest => "Newest first",
             QueueSort::Oldest => "Oldest first",
@@ -48,11 +51,38 @@ impl QueueSort {
     }
 }
 
+/// Provider selection is independent of connection credentials and the UI.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Provider {
+    #[default]
+    Gitlab,
+    Github,
+}
+impl Provider {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Gitlab => "GitLab",
+            Self::Github => "GitHub",
+        }
+    }
+    pub fn available(self) -> bool {
+        self == Self::Gitlab
+    }
+}
+
 /// Non-secret configuration only. Credentials live in the system keychain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    /// `default` is reserved for the imported single-connection configuration.
+    pub id: String,
+    pub name: String,
+    pub provider: Provider,
+    #[serde(rename = "url", alias = "gitlab_url")]
     pub gitlab_url: String,
+    /// GitLab group/subgroup path; empty includes all accessible groups.
+    pub group: String,
     pub refresh_seconds: u64,
     pub claude_path: String,
     pub mr_roles: Vec<MrRole>,
@@ -66,7 +96,11 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            id: "default".into(),
+            name: "Default project".into(),
+            provider: Provider::Gitlab,
             gitlab_url: String::new(),
+            group: String::new(),
             refresh_seconds: 120,
             claude_path: "claude".into(),
             mr_roles: vec![MrRole::Reviewer, MrRole::Assignee],
@@ -77,6 +111,48 @@ impl Default for Config {
     }
 }
 impl Config {
+    pub fn validate_project(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.id.is_empty()
+                && self.id.len() <= 100
+                && self
+                    .id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+            "Project ID must contain only letters, digits, hyphens or underscores"
+        );
+        anyhow::ensure!(!self.name.trim().is_empty(), "Enter a project name");
+        anyhow::ensure!(
+            self.group.is_empty()
+                || self.group.split('/').all(|part| !part.is_empty()
+                    && part != "."
+                    && part != ".."
+                    && part
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))),
+            "Enter a group path, for example team/platform, without an URL"
+        );
+        Ok(())
+    }
+    /// Existing credentials stay reachable; new profiles never inherit a host's token.
+    pub fn credential_key(&self) -> String {
+        let url = self.gitlab_url.trim_end_matches('/');
+        if self.id == "default" && self.provider == Provider::Gitlab {
+            url.into()
+        } else {
+            format!("project:{}:{}:{url}", self.id, self.provider.label())
+        }
+    }
+    /// Scope changes must not restore another group's queue or analysis.
+    pub fn namespace(&self) -> String {
+        let key = self.credential_key();
+        if self.group.is_empty() {
+            key
+        } else {
+            format!("{key}#group={}", self.group)
+        }
+    }
+
     /// The specification folder with `~` expanded, or `None` when not configured.
     pub fn spec_dir(&self) -> Option<PathBuf> {
         let path = self.spec_path.trim();

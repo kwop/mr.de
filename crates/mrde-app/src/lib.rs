@@ -1,4 +1,5 @@
 mod backend;
+mod deferred;
 mod demo;
 mod ellipsis;
 mod image_viewer;
@@ -6,10 +7,14 @@ mod images;
 mod markdown;
 mod mermaid;
 mod paragraph;
+mod projects;
 mod settings;
 #[cfg(target_os = "macos")]
 mod snapshot;
+#[cfg(target_os = "macos")]
+mod terminal;
 mod theme;
+mod threads;
 mod ui;
 
 use gpui::{prelude::*, *};
@@ -47,7 +52,8 @@ pub fn run() -> anyhow::Result<()> {
                     titlebar: Some(TitlebarOptions {
                         title: Some("mr.de".into()),
                         appears_transparent: true,
-                        traffic_light_position: Some(point(px(18.), px(14.))),
+                        // Centered in the 52 pt title bar (`theme::TITLEBAR_HEIGHT`).
+                        traffic_light_position: Some(point(px(18.), px(19.))),
                     }),
                     ..Default::default()
                 },

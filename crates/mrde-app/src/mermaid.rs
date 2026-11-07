@@ -6,10 +6,7 @@ use gpui::{
     prelude::*, px, rgb, size,
 };
 use markdown::{ParseOptions, mdast::Node};
-use std::{
-    collections::HashMap,
-    sync::{Arc, LazyLock, Mutex},
-};
+use std::sync::Arc;
 
 /// Untrusted descriptions: bound the work done for a single diagram.
 const MAX_SOURCE: usize = 20_000;
@@ -115,7 +112,7 @@ fn scaled(svg: &str) -> Option<(String, f32, f32)> {
     ))
 }
 
-fn render_uncached(code: &str) -> Result<Diagram, String> {
+pub(crate) fn render_uncached(code: &str) -> Result<Diagram, String> {
     if code.len() > MAX_SOURCE {
         return Err("diagram is too large to render".into());
     }
@@ -137,23 +134,6 @@ fn render_uncached(code: &str) -> Result<Diagram, String> {
         width,
         height,
     })
-}
-
-type Cache = HashMap<String, Result<Arc<Diagram>, String>>;
-static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Default::default);
-
-/// Rendering is cached by source so repainting never re-runs layout.
-pub fn render(code: &str) -> Result<Arc<Diagram>, String> {
-    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(result) = cache.get(code) {
-        return result.clone();
-    }
-    if cache.len() >= 64 {
-        cache.clear();
-    }
-    let result = render_uncached(code).map(Arc::new);
-    cache.insert(code.to_owned(), result.clone());
-    result
 }
 
 /// An image filling the available width up to its natural size, at its aspect ratio.
@@ -251,14 +231,31 @@ impl Element for Fitted {
     }
 }
 
-pub fn element(code: &str) -> AnyElement {
-    match render(code) {
+pub fn element(code: &str, window: &mut Window, cx: &mut App) -> AnyElement {
+    let result = crate::deferred::load(format!("mermaid:{code}").into(), window, cx, || {
+        let code = code.to_owned();
+        move || render_uncached(&code)
+    });
+    let result = match result {
+        None => {
+            return div()
+                .debug_selector(|| "mermaid-loading".into())
+                .h(px(64.))
+                .p_3()
+                .text_color(rgb(MUTED))
+                .child("Rendering diagram…")
+                .into_any_element();
+        }
+        Some(Ok(result)) => result,
+        Some(Err(error)) => Arc::new(Err(error)),
+    };
+    match &*result {
         Ok(diagram) => div()
             .debug_selector(|| "mermaid-diagram".into())
             .flex_shrink_0()
             .min_w_0()
             .p_3()
-            .rounded(px(7.))
+            .rounded(px(RADIUS_CARD))
             .bg(rgb(FIELD))
             .flex()
             .justify_center()
@@ -273,7 +270,7 @@ pub fn element(code: &str) -> AnyElement {
             .flex_shrink_0()
             .w_full()
             .p_3()
-            .rounded(px(7.))
+            .rounded(px(RADIUS_CARD))
             .bg(rgb(FIELD))
             .flex()
             .flex_col()
@@ -319,11 +316,12 @@ mod tests {
     }
     #[test]
     fn renders_a_flowchart_to_a_retina_svg_and_reports_errors() {
-        let diagram = render("flowchart LR\n  A[Start] --> B{Choice}\n  B --> C[Done]").unwrap();
+        let diagram =
+            render_uncached("flowchart LR\n  A[Start] --> B{Choice}\n  B --> C[Done]").unwrap();
         assert!(diagram.width > 0. && diagram.height > 0.);
         let svg = std::str::from_utf8(diagram.image.bytes()).unwrap();
         assert!(svg.contains(&format!("width=\"{}\"", diagram.width * SCALE)));
-        assert!(render(&"x".repeat(MAX_SOURCE + 1)).is_err());
+        assert!(render_uncached(&"x".repeat(MAX_SOURCE + 1)).is_err());
     }
     #[test]
     fn scaled_svg_keeps_view_box_and_doubles_size() {

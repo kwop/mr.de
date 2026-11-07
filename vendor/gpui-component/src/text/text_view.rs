@@ -598,21 +598,8 @@ impl Element for TextView {
             let (tx, rx) = smol::channel::unbounded::<Update>();
             let (tx_result, rx_result) =
                 smol::channel::unbounded::<Result<ParsedContent, SharedString>>();
-            let parsed_result = parse_content(
-                type_,
-                &text,
-                style.clone(),
-                &highlight_theme,
-                &code_block_actions,
-            );
-
-            self.state.update(cx, {
-                let tx = tx.clone();
-                |state, _| {
-                    state.parsed_result = Some(parsed_result);
-                    state.tx = Some(tx);
-                }
-            });
+            // MR.DE: initial parsing/highlighting must not run inside request_layout.
+            self.state.update(cx, |state, _| state.tx = Some(tx.clone()));
 
             cx.spawn({
                 let state = self.state.downgrade();
@@ -636,16 +623,14 @@ impl Element for TextView {
             })
             .detach();
 
-            cx.background_spawn(UpdateFuture::new(
-                type_,
-                style,
-                text,
-                highlight_theme,
-                rx,
-                tx_result,
-                Duration::from_millis(200),
-                code_block_actions,
-            ))
+            cx.background_spawn(async move {
+                let initial = parse_content(type_, &text, style.clone(), &highlight_theme, &code_block_actions);
+                let _ = tx_result.try_send(initial);
+                UpdateFuture::new(
+                    type_, style, text, highlight_theme, rx, tx_result,
+                    Duration::from_millis(200), code_block_actions,
+                ).await;
+            })
             .detach();
 
             self.init_state = Some(InitState::Initialized { tx });

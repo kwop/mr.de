@@ -15,12 +15,15 @@ chrono.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
+serde.workspace = true
 mrde-core.workspace = true
+mrde-risk.workspace = true
 mrde-forge.workspace = true
 mrde-git.workspace = true
 mrde-insights.workspace = true
 mrde-claude.workspace = true
 mrde-store.workspace = true
+mrde-resolver.workspace = true
 gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
 gpui-component = "=0.5.0"
 gpui-component-assets = "=0.5.0"
@@ -31,6 +34,7 @@ mermaid-rs-renderer = { version = "=0.3.1", default-features = false }
 futures-util = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+mrde-ghostty-adapter = { path = "../../vendor/mrde-ghostty-adapter" }
 core-graphics = "=0.24.0"
 core-foundation = "=0.10.0"
 png = "0.18"

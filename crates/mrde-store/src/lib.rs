@@ -11,13 +11,36 @@ impl Store {
         let connection = Connection::open(path)?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
         let version: u32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 1 {
+        if version > 3 {
             anyhow::bail!("Database was created by a newer mr.de version");
         }
         if version == 0 {
             connection.execute_batch(include_str!("../migrations/001_initial.sql"))?;
         }
+        if version < 2 {
+            connection.execute_batch(include_str!("../migrations/002_threads.sql"))?;
+        }
+        if version < 3 { connection.execute_batch(include_str!("../migrations/003_risk.sql"))?; }
         Ok(Self { connection })
+    }
+    pub fn threads(
+        &self,
+        instance: &str,
+    ) -> anyhow::Result<Vec<mrde_core::resolver::ResolverThread>> {
+        let mut statement = self.connection.prepare(
+            "SELECT payload FROM resolver_threads WHERE instance=?1 ORDER BY updated_at DESC",
+        )?;
+        let rows = statement.query_map([instance], |row| row.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+    pub fn save_thread(&self, thread: &mrde_core::resolver::ResolverThread) -> anyhow::Result<()> {
+        self.connection.execute(
+            "INSERT INTO resolver_threads(id,instance,generation,sequence,updated_at,payload) VALUES (?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(id) DO UPDATE SET generation=excluded.generation,sequence=excluded.sequence,updated_at=excluded.updated_at,payload=excluded.payload
+             WHERE (excluded.generation,excluded.sequence) >= (resolver_threads.generation,resolver_threads.sequence)",
+            params![thread.id, thread.instance, thread.generation, thread.sequence, thread.updated_at.to_rfc3339(), serde_json::to_string(thread)?],
+        )?;
+        Ok(())
     }
     pub fn queue(&self, instance: &str) -> anyhow::Result<Vec<MergeRequest>> {
         let raw: Option<String> = self
@@ -83,28 +106,8 @@ impl Store {
     }
 }
 
-/// Values must never be logged or serialized into application configuration.
-pub fn read_secret(instance: &str, name: &str) -> anyhow::Result<String> {
-    let entry = keyring::Entry::new("mrde", &format!("{instance}:{name}"))?;
-    match entry.get_password() {
-        Ok(value) => Ok(value),
-        Err(keyring::Error::NoEntry) => Ok(String::new()),
-        Err(error) => Err(error).context("Cannot read macOS Keychain"),
-    }
-}
-pub fn write_secret(instance: &str, name: &str, value: &str) -> anyhow::Result<()> {
-    let entry = keyring::Entry::new("mrde", &format!("{instance}:{name}"))?;
-    if value.is_empty() {
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(error.into()),
-        }
-    } else {
-        entry
-            .set_password(value)
-            .context("Cannot write macOS Keychain")
-    }
-}
+mod secrets;
+pub use secrets::{read_secret, write_secret, write_secrets};
 
 #[cfg(test)]
 mod tests {
@@ -112,9 +115,15 @@ mod tests {
     #[test]
     fn migration_is_repeatable_and_cache_is_isolated() {
         let store = Store::open(Path::new(":memory:")).unwrap();
+        let version: u32 = store
+            .connection
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+        // The new migration is repeatable and does not replace the existing caches.
         store
             .connection
-            .execute_batch(include_str!("../migrations/001_initial.sql"))
+            .execute_batch(include_str!("../migrations/002_threads.sql"))
             .unwrap();
         let review = Review {
             summary: "Summary".into(),
@@ -147,3 +156,5 @@ mod tests {
         );
     }
 }
+
+pub mod risk;

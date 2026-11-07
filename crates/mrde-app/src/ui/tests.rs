@@ -29,8 +29,20 @@ impl ControlledSettings {
 }
 #[async_trait]
 impl ConnectionSettings for ControlledSettings {
+    async fn activate_project(&self, id: String) -> anyhow::Result<Config> {
+        if self.fail {
+            anyhow::bail!("Cannot activate project");
+        }
+        Ok(Config {
+            id,
+            name: "Second".into(),
+            ..queue_config()
+        })
+    }
+
     async fn save_queue_preferences(
         &self,
+        _project: Config,
         roles: Vec<MrRole>,
         sort: QueueSort,
     ) -> anyhow::Result<Config> {
@@ -71,17 +83,52 @@ struct FakeExecutor {
     fail_images: bool,
     refresh_gate: Option<tokio::sync::Semaphore>,
     refresh_started: AtomicUsize,
+    operation_gate: Option<tokio::sync::Semaphore>,
+    operation_started: AtomicUsize,
     actions: std::sync::Mutex<Vec<String>>,
     queue: Vec<MergeRequest>,
     refreshed_roles: std::sync::Mutex<Vec<Vec<MrRole>>>,
     worktrees: Vec<mrde_git::WorktreeEntry>,
+    resolver_runs: std::sync::Mutex<Vec<mrde_core::resolver::ResolverThread>>,
+    resolver_updates: std::sync::Mutex<Vec<mrde_resolver::Emit>>,
+    resolver_gate: Option<tokio::sync::Semaphore>,
 }
 #[async_trait]
 impl Executor for FakeExecutor {
+    async fn resolve(
+        &self,
+        _: Config,
+        mut thread: mrde_core::resolver::ResolverThread,
+        emit: mrde_resolver::Emit,
+    ) -> anyhow::Result<()> {
+        use mrde_core::resolver::*;
+        thread.attempts = 1;
+        thread.state = ResolverState::FixingPipeline;
+        thread.sessions.push(ClaudeSession {
+            id: mrde_resolver::Uuid::new_v4().to_string(),
+            purpose: "Repair".into(),
+            started_at: chrono::Utc::now(),
+            finished_at: None,
+            output: "Inspecting failed tests".into(),
+        });
+        thread.event("Repair started");
+        self.resolver_runs.lock().unwrap().push(thread.clone());
+        self.resolver_updates.lock().unwrap().push(emit.clone());
+        emit(mrde_resolver::Update::Thread(Box::new(thread.clone())));
+        if let Some(gate) = &self.resolver_gate {
+            gate.acquire().await?.forget();
+        }
+        thread.block("Should an empty summary be skipped?");
+        emit(mrde_resolver::Update::Thread(Box::new(thread)));
+        Ok(())
+    }
     async fn download_image(&self, _: Config, url: String) -> anyhow::Result<Vec<u8>> {
         self.actions.lock().unwrap().push(format!("image {url}"));
         if self.fail_images {
             anyhow::bail!("Image download failed");
+        }
+        if url.ends_with("/portrait.svg") {
+            return Ok(crate::demo::portrait_image());
         }
         Ok(br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#4dc179"/></svg>"##.to_vec())
     }
@@ -94,6 +141,12 @@ impl Executor for FakeExecutor {
                 gate.acquire().await?.forget();
             }
             return Ok(Outcome::Queue(self.queue.clone()));
+        }
+        if !matches!(action, Action::Select(_) | Action::Worktrees)
+            && let Some(gate) = &self.operation_gate
+        {
+            self.operation_started.fetch_add(1, Ordering::SeqCst);
+            gate.acquire().await?.forget();
         }
         let mut actions = self.actions.lock().unwrap();
         match action {
@@ -201,6 +254,32 @@ impl Executor for FakeExecutor {
                     .unwrap(),
                 ))
             }
+            Action::Ask(detail, _) => {
+                actions.push(format!("ask {}", detail.mr.id.iid));
+                let directory = std::env::temp_dir();
+                Ok(Outcome::Ask(Box::new(crate::backend::AskReady::new(
+                    &detail,
+                    directory.clone(),
+                    directory.join("mrde-context"),
+                    &directory.join("mrde-context/context.md"),
+                ))))
+            }
+            Action::Open(reference) => {
+                actions.push(format!("open {reference}"));
+                let iid: u64 = reference.rsplit(['!', '/']).next().unwrap().parse()?;
+                let Some(mr) = self.queue.iter().find(|mr| mr.id.iid == iid).cloned() else {
+                    anyhow::bail!("Cannot open project");
+                };
+                Ok(Outcome::Detail(
+                    Box::new(MrDetail {
+                        mr,
+                        files: vec![],
+                        issues: vec![],
+                        ssh_url: String::new(),
+                    }),
+                    None,
+                ))
+            }
             _ => anyhow::bail!("unexpected action"),
         }
     }
@@ -256,9 +335,13 @@ fn setup_with(
 }
 
 fn draw(root: &Entity<Root>, cx: &mut VisualTestContext) {
-    cx.draw(point(px(0.), px(0.)), size(px(1280.), px(900.)), |_, _| {
-        root.clone()
-    });
+    // Preparation and initial Markdown/diagram layout now complete asynchronously.
+    for _ in 0..4 {
+        cx.draw(point(px(0.), px(0.)), size(px(1280.), px(900.)), |_, _| {
+            root.clone()
+        });
+        cx.run_until_parked();
+    }
 }
 fn click(selector: &'static str, cx: &mut VisualTestContext) {
     let bounds = cx
@@ -318,7 +401,8 @@ fn finish(view: &Entity<Cockpit>, root: &Entity<Root>, cx: &mut VisualTestContex
     for _ in 0..200 {
         std::thread::sleep(Duration::from_millis(5));
         cx.run_until_parked();
-        if cx.update(|_, cx| view.read(cx).job.is_none()) {
+        if cx.update(|_, cx| view.read(cx).job.is_none() && view.read(cx).navigation_job.is_none())
+        {
             draw(root, cx);
             return;
         }
@@ -846,9 +930,12 @@ fn actions_and_error_remain_visible_with_logs_at_minimum_window_size(cx: &mut Te
     service.gate.add_permits(1);
     finish(&view, &root, cx);
     cx.simulate_resize(size(px(1100.), px(720.)));
-    cx.draw(point(px(0.), px(0.)), size(px(1100.), px(720.)), |_, _| {
-        root.clone()
-    });
+    for _ in 0..4 {
+        cx.draw(point(px(0.), px(0.)), size(px(1100.), px(720.)), |_, _| {
+            root.clone()
+        });
+        cx.run_until_parked();
+    }
     for selector in [
         "test-connection",
         "save-settings",
@@ -907,9 +994,12 @@ fn inbox_stacks_list_above_full_width_markdown_and_pins_actions_above_it(cx: &mu
         })
     });
     cx.simulate_resize(size(px(1100.), px(720.)));
-    cx.draw(point(px(0.), px(0.)), size(px(1100.), px(720.)), |_, _| {
-        root.clone()
-    });
+    for _ in 0..4 {
+        cx.draw(point(px(0.), px(0.)), size(px(1100.), px(720.)), |_, _| {
+            root.clone()
+        });
+        cx.run_until_parked();
+    }
     let queue = cx.debug_bounds("mr-queue").unwrap();
     let detail = cx.debug_bounds("mr-detail").unwrap();
     let navigation = cx.debug_bounds("navigation").unwrap();
@@ -969,9 +1059,12 @@ fn inbox_stacks_list_above_full_width_markdown_and_pins_actions_above_it(cx: &mu
         "Markdown links should be interactive, not literal source text"
     );
     click("tab-files", cx);
-    cx.draw(point(px(0.), px(0.)), size(px(1100.), px(720.)), |_, _| {
-        root.clone()
-    });
+    for _ in 0..4 {
+        cx.draw(point(px(0.), px(0.)), size(px(1100.), px(720.)), |_, _| {
+            root.clone()
+        });
+        cx.run_until_parked();
+    }
     let files = cx
         .debug_bounds("changed-files-list")
         .expect("Changed files should have a compact list");
@@ -1747,3 +1840,364 @@ fn long_mr_titles_wrap_without_overlapping_the_metadata(cx: &mut TestAppContext)
         );
     }
 }
+
+fn finish_navigation(view: &Entity<Cockpit>, root: &Entity<Root>, cx: &mut VisualTestContext) {
+    for _ in 0..200 {
+        std::thread::sleep(Duration::from_millis(5));
+        cx.run_until_parked();
+        if cx.update(|_, cx| view.read(cx).navigation_job.is_none()) {
+            draw(root, cx);
+            return;
+        }
+    }
+    panic!("Navigation did not complete independently of the operation");
+}
+
+#[gpui::test]
+fn review_keeps_navigation_and_settings_editable_and_cannot_replace_another_mr(
+    cx: &mut TestAppContext,
+) {
+    let executor = Arc::new(FakeExecutor {
+        queue: vec![
+            queue_fixture(1, "2026-11-05T12:00:00Z"),
+            queue_fixture(2, "2026-11-06T12:00:00Z"),
+        ],
+        operation_gate: Some(tokio::sync::Semaphore::new(0)),
+        ..Default::default()
+    });
+    let (view, root, mut visual) = setup_with(
+        cx,
+        Arc::new(ControlledSettings::new(false)),
+        executor.clone(),
+        queue_config(),
+    );
+    let cx = &mut visual;
+    click("mr-1-1", cx);
+    finish(&view, &root, cx);
+    click("run-review", cx);
+    draw(&root, cx);
+    click("run-review", cx); // Must not start the same operation twice.
+    click("nav-settings", cx);
+    draw(&root, cx);
+    assert!(cx.update(|_, cx| view.read(cx).settings));
+    click("gitlab-token", cx);
+    cx.simulate_input("synthetic-token");
+    draw(&root, cx);
+    assert_eq!(
+        cx.update(|_, cx| view.read(cx).token.read(cx).value()),
+        "synthetic-token"
+    );
+    click("nav-worktrees", cx);
+    finish_navigation(&view, &root, cx);
+    assert!(cx.update(|_, cx| view.read(cx).worktrees_view));
+    click("nav-queue", cx);
+    draw(&root, cx);
+    click("mr-1-2", cx);
+    finish_navigation(&view, &root, cx);
+    cx.update(|_, cx| {
+        let state = view.read(cx);
+        assert_eq!(state.detail.as_ref().unwrap().mr.id.iid, 2);
+        assert!(state.job.is_some());
+        assert!(state.review.is_none());
+        assert!(state.status.contains("Running review"));
+    });
+    executor.operation_gate.as_ref().unwrap().add_permits(1);
+    finish(&view, &root, cx);
+    cx.update(|_, cx| {
+        let state = view.read(cx);
+        assert_eq!(state.detail.as_ref().unwrap().mr.id.iid, 2);
+        assert!(state.review.is_none());
+        assert!(state.detail_tab == DetailTab::Description);
+        assert!(state.status.contains("another MR"));
+    });
+    assert_eq!(executor.operation_started.load(Ordering::SeqCst), 1);
+}
+
+#[gpui::test]
+fn settings_operations_do_not_trap_navigation_or_return_to_settings_on_completion(
+    cx: &mut TestAppContext,
+) {
+    for operation in [SettingsOperation::Test, SettingsOperation::Save] {
+        let service = Arc::new(ControlledSettings::new(false));
+        let executor = Arc::new(FakeExecutor {
+            queue: vec![queue_fixture(1, "2026-11-05T12:00:00Z")],
+            ..Default::default()
+        });
+        let (view, root, mut visual) = setup_with(cx, service.clone(), executor, queue_config());
+        let cx = &mut visual;
+        click("nav-settings", cx);
+        draw(&root, cx);
+        click(
+            if operation == SettingsOperation::Test {
+                "test-connection"
+            } else {
+                "save-settings"
+            },
+            cx,
+        );
+        draw(&root, cx);
+        click("nav-queue", cx);
+        draw(&root, cx);
+        assert!(!cx.update(|_, cx| view.read(cx).settings));
+        click("mr-1-1", cx);
+        finish_navigation(&view, &root, cx);
+        assert!(cx.update(|_, cx| view.read(cx).detail.is_some()));
+        service.gate.add_permits(1);
+        finish(&view, &root, cx);
+        assert!(!cx.update(|_, cx| view.read(cx).settings));
+        click("nav-settings", cx);
+        draw(&root, cx);
+        assert!(!cx.update(|_, cx| view.read(cx).feedback_error));
+    }
+}
+
+#[gpui::test]
+fn navigation_ignores_late_details_after_another_selection_and_close(cx: &mut TestAppContext) {
+    let executor = Arc::new(FakeExecutor {
+        queue: vec![
+            queue_fixture(1, "2026-11-05T12:00:00Z"),
+            queue_fixture(2, "2026-11-06T12:00:00Z"),
+        ],
+        ..Default::default()
+    });
+    let (view, root, mut visual) = setup_with(
+        cx,
+        Arc::new(ControlledSettings::new(false)),
+        executor,
+        queue_config(),
+    );
+    let cx = &mut visual;
+    click("mr-1-1", cx);
+    finish(&view, &root, cx);
+    let (old_generation, old_detail) = cx.update(|_, cx| {
+        let state = view.read(cx);
+        (state.navigation_generation, state.detail.clone().unwrap())
+    });
+    click("mr-1-2", cx);
+    finish(&view, &root, cx);
+    cx.update(|_, cx| {
+        view.update(cx, |state, cx| {
+            state
+                .navigation_sender
+                .send((
+                    old_generation,
+                    Ok(Outcome::Detail(old_detail.clone(), None)),
+                ))
+                .unwrap();
+            state.poll(cx);
+            assert_eq!(state.detail.as_ref().unwrap().mr.id.iid, 2);
+        })
+    });
+    let generation = cx.update(|_, cx| view.read(cx).navigation_generation);
+    click("close-mr", cx);
+    cx.update(|_, cx| {
+        view.update(cx, |state, cx| {
+            state
+                .navigation_sender
+                .send((generation, Ok(Outcome::Detail(old_detail, None))))
+                .unwrap();
+            state.poll(cx);
+            assert!(state.detail.is_none());
+            assert!(state.selected_mr.is_none());
+        })
+    });
+}
+
+#[gpui::test]
+fn startup_cache_can_wait_without_blocking_window_navigation(cx: &mut TestAppContext) {
+    let (view, root, mut visual) = setup(cx, Arc::new(ControlledSettings::new(false)));
+    let cx = &mut visual;
+    let (release, gate) = std::sync::mpsc::channel();
+    let ui_thread = std::thread::current().id();
+    cx.update(|window, cx| {
+        view.update(cx, |state, cx| {
+            state.initialize(window, cx, move || {
+                assert_ne!(std::thread::current().id(), ui_thread);
+                gate.recv_timeout(Duration::from_secs(5))
+                    .expect("test did not release the cache loader");
+                (
+                    queue_config(),
+                    vec![queue_fixture(1, "2026-11-05T12:00:00Z")],
+                    "Cache loaded".into(),
+                    vec![queue_config()],
+                )
+            });
+        })
+    });
+    draw(&root, cx);
+    click("nav-settings", cx);
+    draw(&root, cx);
+    assert!(cx.update(|_, cx| view.read(cx).settings && view.read(cx).initializing));
+    click("toggle-debug", cx);
+    draw(&root, cx);
+    assert!(cx.update(|_, cx| view.read(cx).logs_open));
+    release.send(()).unwrap();
+    for _ in 0..200 {
+        std::thread::sleep(Duration::from_millis(5));
+        cx.run_until_parked();
+        if !cx.update(|_, cx| view.read(cx).initializing) {
+            break;
+        }
+    }
+    draw(&root, cx);
+    cx.update(|_, cx| {
+        let state = view.read(cx);
+        assert!(!state.initializing);
+        assert!(state.settings);
+        assert_eq!(state.queue.len(), 1);
+        assert_eq!(state.url.read(cx).value(), "https://gitlab.example.com");
+    });
+}
+
+#[gpui::test]
+fn large_file_list_only_builds_visible_rows_and_can_scroll_to_the_end(cx: &mut TestAppContext) {
+    let executor = Arc::new(FakeExecutor {
+        queue: vec![queue_fixture(1, "2026-11-05T12:00:00Z")],
+        ..Default::default()
+    });
+    let (view, root, mut visual) = setup_with(
+        cx,
+        Arc::new(ControlledSettings::new(false)),
+        executor,
+        queue_config(),
+    );
+    let cx = &mut visual;
+    click("mr-1-1", cx);
+    finish(&view, &root, cx);
+    cx.update(|_, cx| {
+        view.update(cx, |state, cx| {
+            state.detail.as_mut().unwrap().files = (0..3000)
+                .map(|index| mrde_core::models::ChangedFile {
+                    old_path: format!("src/file_{index}.rs"),
+                    new_path: format!("src/file_{index}.rs"),
+                    diff: "@@ -1 +1 @@\n-old\n+new\n".into(),
+                    collapsed: false,
+                    too_large: false,
+                })
+                .collect();
+            state.presentation_revision += 1;
+            state.reader_focused = true;
+            state.show_detail_tab(DetailTab::Files);
+            cx.notify();
+        })
+    });
+    draw(&root, cx);
+    assert!(cx.debug_bounds("changed-file-0").is_some());
+    assert!(cx.debug_bounds("changed-file-2999").is_none());
+    let list = cx.debug_bounds("changed-files-list").unwrap();
+    let position = point(list.center().x, list.origin.y + px(30.));
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position,
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-200_000.))),
+        touch_phase: gpui::TouchPhase::Moved,
+        ..Default::default()
+    });
+    draw(&root, cx);
+    assert!(
+        cx.debug_bounds("changed-file-2999").is_some(),
+        "The final file must stay accessible"
+    );
+}
+
+fn pump_threads(view: &Entity<Cockpit>, root: &Entity<Root>, cx: &mut VisualTestContext) {
+    for _ in 0..10 {
+        std::thread::sleep(Duration::from_millis(5));
+        cx.update(|_, cx| {
+            let threads = view.read(cx).threads.clone();
+            threads.update(cx, |threads, cx| threads.poll(cx));
+        });
+        draw(root, cx);
+    }
+}
+#[gpui::test]
+fn resolver_keeps_navigation_available_and_stop_rejects_late_worker_events(
+    cx: &mut TestAppContext,
+) {
+    use mrde_core::resolver::ResolverState;
+    let executor = Arc::new(FakeExecutor {
+        queue: vec![queue_fixture(1, "2026-11-05T12:00:00Z")],
+        resolver_gate: Some(tokio::sync::Semaphore::new(0)),
+        ..Default::default()
+    });
+    let (view, root, mut visual) = setup_with(
+        cx,
+        Arc::new(ControlledSettings::new(false)),
+        executor.clone(),
+        queue_config(),
+    );
+    let cx = &mut visual;
+    click("mr-1-1", cx);
+    finish(&view, &root, cx);
+    click("super-resolver", cx);
+    pump_threads(&view, &root, cx);
+    assert!(cx.update(|_, cx| view.read(cx).threads_view));
+    assert_eq!(executor.resolver_runs.lock().unwrap().len(), 1);
+    click("nav-settings", cx);
+    draw(&root, cx);
+    click("gitlab-token", cx);
+    cx.simulate_input("synthetic-token");
+    assert_eq!(
+        cx.update(|_, cx| view.read(cx).token.read(cx).value().to_string()),
+        "synthetic-token"
+    );
+    click("nav-threads", cx);
+    draw(&root, cx);
+    click("stop-resolver", cx);
+    let mut late = executor.resolver_runs.lock().unwrap()[0].clone();
+    late.state = ResolverState::Succeeded;
+    late.sequence += 100;
+    executor.resolver_updates.lock().unwrap()[0](mrde_resolver::Update::Thread(Box::new(late)));
+    pump_threads(&view, &root, cx);
+    assert_eq!(
+        cx.update(|_, cx| view.read(cx).threads.read(cx).records[0].state.clone()),
+        ResolverState::Stopped
+    );
+    click("resume-resolver", cx);
+    pump_threads(&view, &root, cx);
+    assert_eq!(executor.resolver_runs.lock().unwrap().len(), 2);
+    assert_eq!(executor.resolver_runs.lock().unwrap()[1].generation, 3);
+}
+#[gpui::test]
+fn persisted_active_threads_require_manual_resume_after_relaunch(cx: &mut TestAppContext) {
+    use crate::threads::Message;
+    use mrde_core::resolver::ResolverState;
+    let executor = Arc::new(FakeExecutor::default());
+    let (view, root, mut visual) = setup_with(
+        cx,
+        Arc::new(ControlledSettings::new(false)),
+        executor.clone(),
+        queue_config(),
+    );
+    let cx = &mut visual;
+    let record = mrde_resolver::new_thread(
+        queue_config().gitlab_url,
+        MrId { project: 1, iid: 2 },
+        "Interrupted repair".into(),
+        "a".repeat(40),
+        "{}".into(),
+    );
+    cx.update(|_, cx| {
+        let threads = view.read(cx).threads.clone();
+        threads.update(cx, |threads, cx| {
+            threads
+                .sender
+                .send(Message::Loaded(1, Ok(vec![record])))
+                .unwrap();
+            threads.poll(cx);
+        });
+    });
+    click("nav-threads", cx);
+    draw(&root, cx);
+    assert_eq!(
+        cx.update(|_, cx| view.read(cx).threads.read(cx).records[0].state.clone()),
+        ResolverState::Interrupted
+    );
+    assert!(executor.resolver_runs.lock().unwrap().is_empty());
+}
+
+mod chrome;
+
+mod ask;
+mod projects;
+
+mod scrolling;

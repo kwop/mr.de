@@ -44,6 +44,7 @@ impl Cockpit {
                         .small()
                         .h(px(32.))
                         .primary()
+                        .icon(gpui_component::IconName::Bot)
                         .label(format!("Run {} review", self.level.label().to_lowercase()))
                         .disabled(locked)
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -63,6 +64,7 @@ impl Cockpit {
                     Button::new("toolbar-analyze")
                         .small()
                         .h(px(32.))
+                        .icon(gpui_component::IconName::ChartPie)
                         .label("Analyze")
                         .tooltip("Symbols, impact, history, contracts, and risky patterns from the worktree")
                         .disabled(locked)
@@ -78,29 +80,44 @@ impl Cockpit {
                 ),
             )
             .child(
-                div().debug_selector(|| "discuss".into()).child(
-                    Button::new("chat")
+                div().debug_selector(|| "ask-claude".into()).child(
+                    Button::new("ask-claude")
                         .small()
                         .h(px(32.))
                         .ghost()
-                        .label("Discuss")
+                        .icon(gpui_component::IconName::SquareTerminal)
+                        .label("Ask Claude")
+                        .tooltip("Ask Claude Code about this merge request in Threads. Read-only: plan mode, nothing is edited or pushed.")
                         .disabled(locked)
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(detail) = this.detail.clone() {
                                 this.start(
-                                    Action::Chat(detail, this.review.clone()),
-                                    "Opening Ghostty…",
+                                    Action::Ask(detail, this.review.clone()),
+                                    "Preparing the worktree and context for Claude Code…",
                                     cx,
                                 );
                             }
                         })),
                 ),
             )
+            .child(div().debug_selector(|| "super-resolver".into()).child(
+                Button::new("super-resolver").small().h(px(32.)).label("Super Resolver")
+                    .tooltip("Rebase, resolve conflicts, and push pipeline fixes to the source branch. Up to three repair attempts.")
+                    .disabled(self.initializing || self.confirm)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(detail) = &this.detail {
+                            this.threads.update(cx, |threads, cx| threads.start(detail, cx));
+                            this.threads_view = true; this.settings = false; this.worktrees_view = false;
+                            cx.notify();
+                        }
+                    })),
+            ))
             .child(
                 div().debug_selector(|| "approve".into()).child(
                     Button::new("approve")
                         .small()
                         .h(px(32.))
+                        .icon(gpui_component::IconName::Check)
                         .label("Approve")
                         .disabled(locked)
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -132,7 +149,7 @@ impl Cockpit {
         let busy = self.is_busy();
         div()
             .p_3()
-            .rounded(px(7.))
+            .rounded(px(RADIUS_CARD))
             .border_1()
             .border_color(rgb(WARNING))
             .flex()
@@ -191,7 +208,7 @@ impl Cockpit {
             .flex()
             .gap_1()
             .p(px(2.))
-            .rounded(px(7.))
+            .rounded(px(RADIUS_CARD))
             .bg(rgb(FIELD));
         for (index, level) in ReviewLevel::ALL.into_iter().enumerate() {
             let selected = self.level == level;
@@ -248,10 +265,11 @@ impl Cockpit {
         let spec = self.config.spec_dir();
         let panel = div().child(block(
             "Compliance check",
+            // The folder as configured (`~/…`), not expanded to the home directory.
             match &spec {
-                Some(path) => format!(
+                Some(_) => format!(
                     "Checks the ticket and the change against the specification in {}.",
-                    path.display()
+                    self.config.spec_path.trim()
                 ),
                 None => "Set the specification folder in GitLab settings first.".into(),
             },

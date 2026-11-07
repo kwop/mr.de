@@ -35,6 +35,7 @@ impl Cockpit {
         };
         let mut view = div()
             .debug_selector(|| "history-view".into())
+            .flex_shrink_0()
             .min_w_0()
             .flex()
             .flex_col()
@@ -310,6 +311,12 @@ impl Cockpit {
                 }
             }
         }
-        view.into_any_element()
+        view.child(
+            div()
+                .debug_selector(|| "history-end".into())
+                .h(px(1.))
+                .flex_shrink_0(),
+        )
+        .into_any_element()
     }
 }

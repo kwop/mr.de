@@ -1,4 +1,5 @@
 //! Connection settings: testing performs no writes; saving performs no HTTP requests.
+use crate::projects::{CONFIG_LOCK, Projects};
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 use mrde_core::config::{Config, MrRole, QueueSort, config_dir};
@@ -22,6 +23,17 @@ impl Draft {
             .trim()
             .trim_end_matches('/')
             .to_string();
+        self.config.name = self.config.name.trim().to_string();
+        self.config.group = self.config.group.trim().trim_matches('/').to_string();
+        self.config.validate_project()?;
+        anyhow::ensure!(
+            self.config.refresh_seconds >= 30,
+            "Refresh interval must be at least 30 seconds"
+        );
+        anyhow::ensure!(
+            !self.config.claude_path.is_empty(),
+            "Enter the Claude executable"
+        );
         // Validate before accessing Keychain, including URLs containing credentials.
         GitLab::new(&self.config.gitlab_url, "validation", &[])?;
         if self.config.mr_roles.is_empty() {
@@ -50,13 +62,30 @@ impl Draft {
                 ("CF-Access-Client-Secret".into(), self.cf_secret.clone()),
             ]
         };
-        GitLab::new(&self.config.gitlab_url, &self.token, &headers)
+        Ok(GitLab::new(&self.config.gitlab_url, &self.token, &headers)?
+            .with_group(&self.config.group))
     }
 }
 
 pub trait Secrets: Send + Sync {
     fn read(&self, instance: &str, name: &str) -> anyhow::Result<String>;
     fn write(&self, instance: &str, name: &str, value: &str) -> anyhow::Result<()>;
+    fn write_batch(&self, instance: &str, updates: &[(&str, &str)]) -> anyhow::Result<()> {
+        let old = updates
+            .iter()
+            .map(|(name, _)| self.read(instance, name))
+            .collect::<anyhow::Result<Vec<_>>>()
+            .context("Cannot read existing Keychain values; nothing was changed")?;
+        for (index, (name, value)) in updates.iter().enumerate() {
+            if let Err(error) = self.write(instance, name, value) {
+                for ((name, _), value) in updates[..index].iter().zip(&old) {
+                    let _ = self.write(instance, name, value);
+                }
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
 }
 pub struct Keychain;
 impl Secrets for Keychain {
@@ -66,14 +95,21 @@ impl Secrets for Keychain {
     fn write(&self, instance: &str, name: &str, value: &str) -> anyhow::Result<()> {
         mrde_store::write_secret(instance, name, value)
     }
+    fn write_batch(&self, instance: &str, updates: &[(&str, &str)]) -> anyhow::Result<()> {
+        mrde_store::write_secrets(instance, updates)
+    }
 }
 #[async_trait]
 pub trait ConnectionSettings: Send + Sync {
     async fn test(&self, draft: Draft, progress: Progress) -> anyhow::Result<String>;
     async fn save(&self, draft: Draft, progress: Progress) -> anyhow::Result<Config>;
+    async fn activate_project(&self, _id: String) -> anyhow::Result<Config> {
+        bail!("Project switching is unavailable in this mode")
+    }
     /// Updates only non-secret queue preferences, without resolving credentials.
     async fn save_queue_preferences(
         &self,
+        project: Config,
         roles: Vec<MrRole>,
         sort: QueueSort,
     ) -> anyhow::Result<Config>;
@@ -95,7 +131,8 @@ impl SettingsService {
         progress("Resolving credentials (macOS may request Keychain access)".into());
         let secrets = self.secrets.clone();
         draft = tokio::task::spawn_blocking(move || -> anyhow::Result<Draft> {
-            let url = &draft.config.gitlab_url;
+            let key = draft.config.credential_key();
+            let url = &key;
             if draft.token.is_empty() {
                 draft.token = secrets.read(url, "gitlab-token")?;
             }
@@ -113,14 +150,30 @@ impl SettingsService {
             Ok(draft)
         })
         .await??;
-        draft.client()?;
+        if draft.config.provider.available() {
+            draft.client()?;
+        }
         Ok(draft)
     }
 }
 #[async_trait]
 impl ConnectionSettings for SettingsService {
+    async fn activate_project(&self, id: String) -> anyhow::Result<Config> {
+        let directory = self.directory.clone();
+        tokio::task::spawn_blocking(move || {
+            let _lock = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let mut catalog = Projects::load(&directory)?;
+            catalog.active = id;
+            let config = catalog.current()?;
+            catalog.save(&directory)?;
+            Ok(config)
+        })
+        .await?
+    }
+
     async fn save_queue_preferences(
         &self,
+        project: Config,
         roles: Vec<MrRole>,
         sort: QueueSort,
     ) -> anyhow::Result<Config> {
@@ -129,25 +182,30 @@ impl ConnectionSettings for SettingsService {
         }
         let directory = self.directory.clone();
         tokio::task::spawn_blocking(move || {
-            let path = directory.join("config.toml");
-            let mut config: Config = toml::from_str(
-                &std::fs::read_to_string(&path)
-                    .context("Save your GitLab connection before changing queue preferences")?,
-            )?;
+            let _lock = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let mut catalog = Projects::load(&directory)?;
+            let config = catalog
+                .projects
+                .iter_mut()
+                .find(|p| p.id == project.id)
+                .context("Save this project before changing queue preferences")?;
             config.mr_roles = roles;
             config.mr_sort = sort;
-            let staged = directory.join("config.toml.tmp");
-            std::fs::write(&staged, toml::to_string_pretty(&config)?)
-                .context("Cannot save queue preferences")?;
-            std::fs::rename(staged, path).context("Cannot activate queue preferences")?;
+            let config = config.clone();
+            catalog.save(&directory)?;
             Ok(config)
         })
         .await?
     }
     async fn test(&self, draft: Draft, progress: Progress) -> anyhow::Result<String> {
+        if !draft.config.provider.available() {
+            bail!("GitHub profiles can be saved, but the GitHub connector is not available yet.");
+        }
         let draft = self.resolve(draft, &progress).await?;
         progress("GET /api/v4/user — connecting to GitLab (30s timeout)".into());
-        let user = draft.client()?.test_connection().await?;
+        let client = draft.client()?;
+        let user = client.test_connection().await?;
+        client.test_group().await?;
         progress("GitLab authentication succeeded; nothing has been saved".into());
         Ok(user)
     }
@@ -157,35 +215,24 @@ impl ConnectionSettings for SettingsService {
         let directory = self.directory.clone();
         tokio::task::spawn_blocking(move || {
             progress("Preparing configuration file".into());
-            std::fs::create_dir_all(&directory).context("Cannot create configuration directory")?;
-            let staged = directory.join("config.toml.tmp");
-            std::fs::write(&staged, toml::to_string_pretty(&draft.config)?)
-                .context("Cannot write configuration file")?;
+            let _lock = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let mut catalog = Projects::load(&directory)?;
+            catalog.upsert(draft.config.clone());
+            let staged = catalog.stage(&directory)?;
             progress("Saving credentials to macOS Keychain".into());
-            let url = &draft.config.gitlab_url;
+            let key = draft.config.credential_key();
+            let url = &key;
             let updates = [
-                ("gitlab-token", &draft.token),
-                ("cf-id", &draft.cf_id),
-                ("cf-secret", &draft.cf_secret),
+                ("gitlab-token", draft.token.as_str()),
+                ("cf-id", draft.cf_id.as_str()),
+                ("cf-secret", draft.cf_secret.as_str()),
             ];
-            let previous = updates
-                .iter()
-                .map(|(name, _)| secrets.read(url, name))
-                .collect::<anyhow::Result<Vec<_>>>()
-                .context("Cannot read existing Keychain values; nothing was changed")?;
-            for (index, (name, value)) in updates.iter().enumerate() {
-                if let Err(error) = secrets.write(url, name, value) {
-                    // Restore earlier writes so a failed save never leaves mixed credentials.
-                    for ((name, _), old) in updates[..index].iter().zip(&previous) {
-                        let _ = secrets.write(url, name, old);
-                    }
-                    let _ = std::fs::remove_file(&staged);
-                    return Err(error)
-                        .context("Keychain save failed; configuration was not activated");
-                }
+            if let Err(error) = secrets.write_batch(url, &updates) {
+                let _ = std::fs::remove_file(&staged);
+                return Err(error).context("Keychain save failed; configuration was not activated");
             }
             progress("Activating saved configuration".into());
-            std::fs::rename(staged, directory.join("config.toml"))
+            std::fs::rename(staged, directory.join("projects.toml"))
                 .context("Cannot activate configuration file")?;
             progress("Settings saved successfully".into());
             Ok(draft.config)
@@ -207,7 +254,32 @@ pub fn redact(message: &str, secrets: &[String]) -> String {
 pub struct PreviewSettings;
 #[async_trait]
 impl ConnectionSettings for PreviewSettings {
-    async fn save_queue_preferences(&self, _: Vec<MrRole>, _: QueueSort) -> anyhow::Result<Config> {
+    async fn activate_project(&self, id: String) -> anyhow::Result<Config> {
+        let github = id == "community";
+        Ok(Config {
+            id,
+            name: if github { "Community" } else { "Platform" }.into(),
+            provider: if github {
+                mrde_core::config::Provider::Github
+            } else {
+                mrde_core::config::Provider::Gitlab
+            },
+            gitlab_url: if github {
+                "https://github.com"
+            } else {
+                crate::demo::INSTANCE
+            }
+            .into(),
+            ..Default::default()
+        })
+    }
+
+    async fn save_queue_preferences(
+        &self,
+        _: Config,
+        _: Vec<MrRole>,
+        _: QueueSort,
+    ) -> anyhow::Result<Config> {
         bail!("Preview mode does not save preferences.")
     }
     async fn test(&self, _: Draft, progress: Progress) -> anyhow::Result<String> {
@@ -332,7 +404,7 @@ mod tests {
             .unwrap();
         assert!(server.received_requests().await.unwrap().is_empty());
         assert_eq!(secrets.read("", "gitlab-token").unwrap(), "synthetic-token");
-        let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        let config = std::fs::read_to_string(temp.path().join("projects.toml")).unwrap();
         assert!(!config.contains("synthetic-token"));
         let failed = SettingsService {
             secrets: Arc::new(MemorySecrets {
@@ -348,7 +420,7 @@ mod tests {
                 .is_err()
         );
         assert_eq!(
-            std::fs::read_to_string(temp.path().join("config.toml")).unwrap(),
+            std::fs::read_to_string(temp.path().join("projects.toml")).unwrap(),
             config
         );
     }
@@ -365,9 +437,7 @@ mod tests {
         chosen.config.mr_sort = QueueSort::Oldest;
         let saved = service.save(chosen, Arc::new(|_| {})).await.unwrap();
         assert_eq!(saved.mr_roles, [MrRole::Author, MrRole::Reviewer]);
-        let reloaded: Config =
-            toml::from_str(&std::fs::read_to_string(temp.path().join("config.toml")).unwrap())
-                .unwrap();
+        let reloaded = Projects::load(temp.path()).unwrap().current().unwrap();
         assert_eq!(reloaded.mr_roles, [MrRole::Author, MrRole::Reviewer]);
         assert_eq!(reloaded.mr_sort, QueueSort::Oldest);
         let mut empty = draft("https://other.example.com");
@@ -406,14 +476,21 @@ mod tests {
             claude_path: "/custom/bin/claude".into(),
             ..Default::default()
         };
-        let path = temp.path().join("config.toml");
-        std::fs::write(&path, toml::to_string(&original).unwrap()).unwrap();
+        let path = temp.path().join("projects.toml");
+        std::fs::write(
+            &path,
+            toml::to_string(&Projects::single(original.clone())).unwrap(),
+        )
+        .unwrap();
         service
-            .save_queue_preferences(vec![MrRole::Author], QueueSort::Newest)
+            .save_queue_preferences(original.clone(), vec![MrRole::Author], QueueSort::Newest)
             .await
             .unwrap();
         let saved = std::fs::read_to_string(&path).unwrap();
-        let config: Config = toml::from_str(&saved).unwrap();
+        let config = toml::from_str::<Projects>(&saved)
+            .unwrap()
+            .current()
+            .unwrap();
         assert_eq!(config.gitlab_url, original.gitlab_url);
         assert_eq!(config.refresh_seconds, 300);
         assert_eq!(config.claude_path, original.claude_path);
@@ -421,7 +498,7 @@ mod tests {
         assert_eq!(config.mr_sort, QueueSort::Newest);
         assert!(
             service
-                .save_queue_preferences(vec![], QueueSort::Oldest)
+                .save_queue_preferences(original.clone(), vec![], QueueSort::Oldest)
                 .await
                 .is_err()
         );
@@ -458,7 +535,7 @@ mod tests {
         assert_eq!(secrets.read("", "gitlab-token").unwrap(), "old-token");
         assert_eq!(secrets.read("", "cf-id").unwrap(), "old-id");
         assert!(!temp.path().join("config.toml").exists());
-        assert!(!temp.path().join("config.toml.tmp").exists());
+        assert!(!temp.path().join("projects.toml.tmp").exists());
     }
     #[tokio::test]
     async fn save_rejects_a_missing_specification_folder() {
@@ -487,3 +564,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod projects_tests;

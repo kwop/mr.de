@@ -10,9 +10,9 @@ use gpui_component::{Sizable, button::*};
 use mrde_core::{
     insights::{FileHistory, Level},
     models::*,
-    stats::{gitlab_stats, treemap},
+    stats::treemap,
 };
-use std::rc::Rc;
+use std::{collections::HashMap, sync::Arc};
 
 /// Width-to-height ratio used for layout; the container keeps a fixed height.
 const ASPECT: f64 = 3.;
@@ -25,15 +25,6 @@ const ZONE_COLORS: [u32; 8] = [
 
 pub(super) fn zone_color(index: usize) -> u32 {
     ZONE_COLORS[index % ZONE_COLORS.len()]
-}
-
-#[derive(Clone, PartialEq)]
-struct Key {
-    id: MrId,
-    sha: String,
-    exact: bool,
-    files: usize,
-    risk: bool,
 }
 
 fn risk_color(file: Option<&FileHistory>) -> u32 {
@@ -65,9 +56,10 @@ struct Model {
 }
 
 pub(super) struct Cached {
-    key: Key,
-    files: Rc<Vec<FileStat>>,
-    model: Option<Rc<Model>>,
+    pub files: Arc<Vec<FileStat>>,
+    pub lookup: HashMap<String, usize>,
+    pub widest: u64,
+    model: Option<Model>,
 }
 
 fn build(stats: &DiffStats, history: Option<&[FileHistory]>) -> Option<Model> {
@@ -199,66 +191,93 @@ impl Cockpit {
             .map(|(_, stats)| stats)
     }
 
-    /// Per-file line counts: exact when computed, otherwise from the files GitLab did not
-    /// truncate. Shares the disktree memo, so the Files tab never rescans diffs per frame.
-    pub(super) fn file_stats(&self, detail: &MrDetail) -> Rc<Vec<FileStat>> {
-        self.disktree_cached(detail).0
+    pub(super) fn file_stats(
+        &self,
+        detail: &MrDetail,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Arc<Vec<FileStat>> {
+        self.disktree_cached(detail, window, cx)
+            .map(|cache| cache.files.clone())
+            .unwrap_or_default()
     }
 
-    fn disktree_model(&self, detail: &MrDetail) -> Option<Rc<Model>> {
-        self.disktree_cached(detail).1
-    }
-
-    fn disktree_cached(&self, detail: &MrDetail) -> (Rc<Vec<FileStat>>, Option<Rc<Model>>) {
+    pub(super) fn disktree_cached(
+        &self,
+        detail: &MrDetail,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Arc<Cached>> {
         let exact = self.exact_stats(detail);
-        let key = Key {
-            id: detail.mr.id.clone(),
-            sha: detail.mr.sha.clone(),
-            exact: exact.is_some(),
-            files: exact.map_or(detail.files.len(), |s| s.files.len()),
-            risk: self.risk_colors && self.current_insights().is_some(),
-        };
-        let history = self
-            .current_insights()
-            .filter(|_| key.risk)
-            .map(|insights| insights.history.clone());
-        let mut cache = self.disktree_cache.borrow_mut();
-        if let Some(cached) = cache.as_ref().filter(|c| c.key == key) {
-            return (cached.files.clone(), cached.model.clone());
-        }
-        let files = Rc::new(match exact {
-            Some(stats) => stats.files.clone(),
-            None => detail
-                .files
-                .iter()
-                .filter(|f| !f.too_large && !f.collapsed)
-                .map(mrde_core::stats::file_stat)
-                .collect(),
-        });
-        let model = match exact {
-            Some(stats) => build(stats, history.as_deref()),
-            None => gitlab_stats(&detail.files).and_then(|files| {
-                build(
-                    &DiffStats {
-                        sha: detail.mr.sha.clone(),
-                        source: StatsSource::GitLab,
-                        files,
-                    },
-                    history.as_deref(),
-                )
-            }),
-        }
-        .map(Rc::new);
-        *cache = Some(Cached {
-            key,
-            files: files.clone(),
-            model: model.clone(),
-        });
-        (files, model)
+        let risk = self.risk_colors && self.current_insights().is_some();
+        let key = format!(
+            "statistics:{}:{}:{}:{}:{}:{risk}",
+            self.config.namespace(),
+            detail.mr.id.project,
+            detail.mr.id.iid,
+            detail.mr.sha,
+            self.presentation_revision
+        );
+        crate::deferred::load(key.into(), window, cx, || {
+            let exact = exact.cloned();
+            let changed = if exact.is_none() {
+                detail.files.clone()
+            } else {
+                vec![]
+            };
+            let history = self
+                .current_insights()
+                .filter(|_| risk)
+                .map(|i| i.history.clone());
+            let sha = detail.mr.sha.clone();
+            move || {
+                let truncated = changed.iter().any(|f| f.too_large || f.collapsed);
+                let stats = exact.unwrap_or_else(|| DiffStats {
+                    sha,
+                    source: StatsSource::GitLab,
+                    files: changed
+                        .iter()
+                        .filter(|f| !f.too_large && !f.collapsed)
+                        .map(mrde_core::stats::file_stat)
+                        .collect(),
+                });
+                let model = if truncated {
+                    None
+                } else {
+                    build(&stats, history.as_deref())
+                };
+                let lookup = stats
+                    .files
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| (f.path.clone(), i))
+                    .collect();
+                let widest = stats
+                    .files
+                    .iter()
+                    .map(FileStat::changed)
+                    .max()
+                    .unwrap_or(1)
+                    .max(1);
+                Cached {
+                    files: Arc::new(stats.files),
+                    lookup,
+                    widest,
+                    model,
+                }
+            }
+        })
+        .and_then(Result::ok)
     }
 
-    pub(super) fn disktree_view(&self, detail: &MrDetail, cx: &mut Context<Self>) -> AnyElement {
-        let model = self.disktree_model(detail);
+    pub(super) fn disktree_view(
+        &self,
+        detail: &MrDetail,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let cache = self.disktree_cached(detail, window, cx);
+        let model = cache.as_ref().and_then(|c| c.model.as_ref());
         let analyzed = self.current_insights().is_some();
         let mut toggle = div()
             .flex()
@@ -316,7 +335,7 @@ impl Cockpit {
                 .child(
                     div()
                         .h(px(64.))
-                        .rounded(px(7.))
+                        .rounded(px(RADIUS_CARD))
                         .border_1()
                         .border_color(rgb(LINE))
                         .flex()
@@ -325,7 +344,9 @@ impl Cockpit {
                         .px_4()
                         .text_size(px(12.))
                         .text_color(rgb(MUTED))
-                        .child(if detail.files.is_empty() && self.exact_stats(detail).is_none() {
+                        .child(if cache.is_none() {
+                            "Preparing file statistics…"
+                        } else if detail.files.is_empty() && self.exact_stats(detail).is_none() {
                             "No changed files."
                         } else {
                             "GitLab truncated some diffs. Click Compute statistics to map the changes."
@@ -338,7 +359,7 @@ impl Cockpit {
             .relative()
             .w_full()
             .h(px(HEIGHT))
-            .rounded(px(7.))
+            .rounded(px(RADIUS_CARD))
             .overflow_hidden()
             .bg(rgb(FIELD));
         for (index, tile) in model.tiles.iter().enumerate() {

@@ -3,7 +3,18 @@ use crate::backend::Executor;
 use futures_util::future::BoxFuture;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, Response, Url, http::HeaderValue};
 use mrde_core::config::Config;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+static REQUESTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// GPUI caches images by URL, so a different project's credentials must not reuse them.
+pub fn clear_cache(cx: &mut gpui::App) {
+    for url in REQUESTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .drain(..)
+    {
+        cx.remove_asset::<gpui::ImgResourceLoader>(&gpui::Resource::Uri(url.into()));
+    }
+}
 
 pub struct ImageHttpClient {
     runtime: Arc<tokio::runtime::Runtime>,
@@ -43,6 +54,12 @@ impl HttpClient for ImageHttpClient {
             return Box::pin(async { anyhow::bail!("The image client supports GET only") });
         }
         let url = request.uri().to_string();
+        {
+            let mut requested = REQUESTED.lock().unwrap_or_else(|e| e.into_inner());
+            if !requested.contains(&url) {
+                requested.push(url.clone());
+            }
+        }
         let executor = self.executor.clone();
         let config = self.config.clone();
         let permits = self.permits.clone();

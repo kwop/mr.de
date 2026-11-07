@@ -577,3 +577,7 @@ mod tests {
         assert!(numstat(repo, "not-a-sha", &head).await.is_err());
     }
 }
+
+pub mod resolver;
+
+pub mod risk;

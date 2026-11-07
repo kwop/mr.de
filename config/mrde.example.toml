@@ -1,3 +1,4 @@
+# Legacy single-connection format, imported automatically. Prefer projects.example.toml.
 gitlab_url = "https://gitlab.example.com"
 refresh_seconds = 120
 claude_path = "claude"

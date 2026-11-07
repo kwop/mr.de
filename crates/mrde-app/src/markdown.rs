@@ -12,7 +12,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     hash::{DefaultHasher, Hash, Hasher},
-    rc::Rc,
+    sync::Arc,
 };
 
 enum Part {
@@ -23,7 +23,7 @@ enum Part {
 struct Prepared {
     source: String,
     context: Option<(String, String)>,
-    parts: Rc<[Part]>,
+    parts: Arc<[Part]>,
 }
 
 thread_local! {
@@ -32,7 +32,7 @@ thread_local! {
 
 /// Image rewriting and Mermaid extraction parse the document, so they run once per
 /// document: scrolling re-renders the whole view on every frame.
-fn prepared(source: &str, context: Option<(&str, &str)>) -> Rc<[Part]> {
+fn prepared(source: &str, context: Option<(&str, &str)>) -> Arc<[Part]> {
     let mut hasher = DefaultHasher::new();
     (source, context).hash(&mut hasher);
     let key = hasher.finish();
@@ -47,7 +47,7 @@ fn prepared(source: &str, context: Option<(&str, &str)>) -> Rc<[Part]> {
         if cache.len() >= 256 {
             cache.clear();
         }
-        let parts: Rc<[Part]> = crate::mermaid::split(source)
+        let parts: Arc<[Part]> = crate::mermaid::split(source)
             .into_iter()
             .map(|segment| match segment {
                 crate::mermaid::Segment::Markdown(text) => {
@@ -68,6 +68,29 @@ fn prepared(source: &str, context: Option<(&str, &str)>) -> Rc<[Part]> {
     })
 }
 
+fn prepared_async(
+    source: &str,
+    context: Option<(&str, &str)>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<Result<Arc<Arc<[Part]>>, String>> {
+    crate::deferred::load(
+        format!("markdown:{context:?}:{source}").into(),
+        window,
+        cx,
+        || {
+            let source = source.to_owned();
+            let context = context.map(|(a, b)| (a.to_owned(), b.to_owned()));
+            move || {
+                prepared(
+                    &source,
+                    context.as_ref().map(|(a, b)| (a.as_str(), b.as_str())),
+                )
+            }
+        },
+    )
+}
+
 /// Markdown with top-level ```mermaid blocks rendered as diagrams.
 pub fn view(
     id: impl Into<SharedString>,
@@ -77,9 +100,19 @@ pub fn view(
     cx: &mut App,
 ) -> AnyElement {
     let id = id.into();
-    let parts = prepared(source, context);
-    if let [Part::Markdown(_)] = &*parts {
-        return text_view(id, source, context, window, cx).into_any_element();
+    let parts = match prepared_async(source, context, window, cx) {
+        Some(Ok(parts)) => parts,
+        None => {
+            return div()
+                .debug_selector(|| "markdown-loading".into())
+                .py_3()
+                .child("Preparing description…")
+                .into_any_element();
+        }
+        Some(Err(error)) => return div().child(error).into_any_element(),
+    };
+    if let [Part::Markdown(text)] = &**parts {
+        return render(id, text.clone(), window, cx).into_any_element();
     }
     let mut container = div()
         .w_full()
@@ -98,13 +131,14 @@ pub fn view(
                 cx,
             )
             .into_any_element(),
-            Part::Mermaid(code) => crate::mermaid::element(code),
+            Part::Mermaid(code) => crate::mermaid::element(code, window, cx),
         });
     }
     container.into_any_element()
 }
 
 /// One Markdown document, without Mermaid extraction. Image preparation is cached.
+#[cfg(test)]
 fn text_view(
     id: impl Into<ElementId>,
     source: &str,
@@ -151,14 +185,16 @@ fn render(
     });
     // The containing pane owns scrolling. Each Markdown document sizes to its content.
     // Keys identify a document, so selecting another MR cannot reuse its rendered state.
+    let large = source.len() > 16_384;
     TextView::markdown(id, source, window, cx)
         .style(style)
         .on_image_click(crate::image_viewer::open)
         .selectable(true)
-        .scrollable(false)
+        .scrollable(large)
         // TextView defaults to size_full(). Embedded documents must size to their
         // content and never squeeze alongside other blocks in a scrolling column.
         .h_auto()
+        .when(large, |view| view.h(px(520.)))
         .flex_shrink_0()
         .w_full()
         .min_w_0()
@@ -278,10 +314,10 @@ mod tests {
         ));
         let first = prepared(source, context);
         assert!(
-            Rc::ptr_eq(&first, &prepared(source, context)),
+            Arc::ptr_eq(&first, &prepared(source, context)),
             "scrolling must not re-parse"
         );
-        assert!(!Rc::ptr_eq(&first, &prepared(source, None)));
+        assert!(!Arc::ptr_eq(&first, &prepared(source, None)));
         assert!(
             matches!(&*first, [Part::Markdown(text), Part::Mermaid(_)] if text.contains("/api/v4/projects/"))
         );

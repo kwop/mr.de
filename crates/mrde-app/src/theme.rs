@@ -30,7 +30,15 @@ pub const UI_FONT: &str = ".AppleSystemUIFont";
 pub const CODE_FONT: &str = "Menlo";
 pub const UI_SIZE: f32 = 14.;
 pub const CODE_SIZE: f32 = 12.;
-pub const SIDEBAR_WIDTH: f32 = 184.;
+pub const SIDEBAR_WIDTH: f32 = 200.;
+pub const TITLEBAR_HEIGHT: f32 = 52.;
+pub const CONTEXT_WIDTH: f32 = 300.;
+pub const RAIL_WIDTH: f32 = 52.;
+// Rounded "cartouches", from the largest surface to the smallest chip.
+pub const RADIUS_SHEET: f32 = 10.;
+pub const RADIUS_CARD: f32 = 6.;
+pub const RADIUS_CONTROL: f32 = 6.;
+pub const RADIUS_CHIP: f32 = 3.;
 
 /// A shrinkable, clipped container for [`crate::ellipsis::ellipsis`] text. GPUI 0.2.2's
 /// own `truncate()` and `line_clamp(1)` paint layouts from stale measurements.
@@ -48,7 +56,8 @@ pub fn init(cx: &mut App) {
     theme.font_size = px(UI_SIZE);
     theme.mono_font_family = CODE_FONT.into();
     theme.mono_font_size = px(CODE_SIZE);
-    theme.radius = px(7.);
+    theme.radius = px(RADIUS_CONTROL);
+    theme.radius_lg = px(RADIUS_SHEET);
     theme.shadow = false;
     theme.background = rgb(READING).into();
     theme.foreground = rgb(INK).into();

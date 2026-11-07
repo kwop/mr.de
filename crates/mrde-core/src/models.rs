@@ -66,6 +66,8 @@ impl Label {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeRequest {
+    #[serde(default)]
+    pub risk: Option<crate::risk::RiskSummary>,
     pub id: MrId,
     pub title: String,
     pub description: String,
@@ -338,6 +340,7 @@ mod tests {
 
     fn mr(title: &str, description: &str) -> MergeRequest {
         MergeRequest {
+            risk: None,
             id: MrId {
                 project: 8,
                 iid: 97,

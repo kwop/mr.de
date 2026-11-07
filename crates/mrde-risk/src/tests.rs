@@ -1,0 +1,282 @@
+use super::*;
+use crate::{
+    config::{Command, SensitiveGlob},
+    scorers::*,
+};
+use std::process::Command as Process;
+
+const DIFF: &str = "diff --git a/src/auth.rs b/src/auth.rs\n--- a/src/auth.rs\n+++ b/src/auth.rs\n@@ -1 +1,3 @@\n-fn old() {}\n+use crate::session;\n+fn login() { session::run().unwrap(); }\n+// TODO check expiry\ndiff --git a/tests/auth.rs b/tests/auth.rs\nnew file mode 100644\n--- /dev/null\n+++ b/tests/auth.rs\n@@ -0,0 +1 @@\n+#[test] fn login_test() {}\n";
+fn fixture() -> MrContext {
+    let files = mrde_insights::diff::parse(DIFF);
+    let stats = DiffStats {
+        sha: "b".repeat(40),
+        source: StatsSource::Git,
+        files: files
+            .iter()
+            .map(|f| mrde_core::models::FileStat {
+                path: f.path().into(),
+                added: f.added() as u64,
+                removed: f.removed() as u64,
+                binary: f.binary,
+            })
+            .collect(),
+    };
+    let contents = files
+        .iter()
+        .map(|f| {
+            (
+                f.path().to_string(),
+                (
+                    Some(
+                        f.hunks
+                            .iter()
+                            .flat_map(|h| h.removed.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    ),
+                    Some(
+                        f.hunks
+                            .iter()
+                            .flat_map(|h| h.added.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    ),
+                ),
+            )
+        })
+        .collect();
+    let mut config = RiskConfig::default();
+    config.sensitive = vec![
+        SensitiveGlob {
+            glob: "src/auth*".into(),
+            weight: 1.,
+        },
+        SensitiveGlob {
+            glob: "src/**".into(),
+            weight: 0.5,
+        },
+    ];
+    MrContext {
+        worktree: "/workspace".into(),
+        base_sha: "a".repeat(40),
+        head_sha: "b".repeat(40),
+        files,
+        stats,
+        contents,
+        contents_error: None,
+        coverage: None,
+        config,
+        snapshots: None,
+        snapshot_error: None,
+    }
+}
+#[tokio::test]
+async fn diff_counts_added_and_removed_lines_and_files_count_renames_once() {
+    let ctx = fixture();
+    assert_eq!(DiffScorer.measure(&ctx).await.unwrap().value, 5.);
+    assert_eq!(FileScorer.measure(&ctx).await.unwrap().value, 2.);
+}
+#[tokio::test]
+async fn sensitive_paths_use_the_highest_weight_without_double_counting() {
+    let raw = SensitivePathScorer.measure(&fixture()).await.unwrap();
+    assert_eq!(raw.value, 0.8);
+    assert_eq!(raw.evidence.len(), 1);
+}
+#[tokio::test]
+async fn test_gap_distinguishes_heuristics_from_lcov_and_cobertura() {
+    let mut ctx = fixture();
+    let heuristic = TestGapScorer.measure(&ctx).await.unwrap();
+    assert_eq!(heuristic.value, 0.);
+    assert!(heuristic.estimated);
+    ctx.coverage = Some("SF:/workspace/src/auth.rs\nDA:2,0\nDA:3,1\nend_of_record\n".into());
+    assert_eq!(TestGapScorer.measure(&ctx).await.unwrap().value, 0.5);
+    ctx.coverage=Some(r#"<coverage><packages><package><classes><class filename="src/auth.rs"><lines><line number="2" hits="0"/><line number="3" hits="1"/></lines></class></classes></package></packages></coverage>"#.into());
+    assert_eq!(TestGapScorer.measure(&ctx).await.unwrap().value, 0.5);
+    ctx.coverage = Some("malformed report".into());
+    assert!(TestGapScorer.measure(&ctx).await.is_err());
+}
+#[tokio::test]
+async fn debt_counts_only_added_lines_and_preserves_line_evidence() {
+    let raw = DebtScorer.measure(&fixture()).await.unwrap();
+    assert_eq!(raw.value, 2.);
+    assert_eq!(raw.evidence[0].line, Some(2));
+}
+#[tokio::test]
+async fn coupling_counts_new_targets_and_manifest_dependencies_in_four_ecosystems() {
+    let mut ctx = fixture();
+    assert_eq!(CouplingScorer.measure(&ctx).await.unwrap().value, 1.);
+    for (path, before, after) in [
+        ("Cargo.toml", "[dependencies]", "[dependencies]\nserde='1'"),
+        ("package.json", "{}", r#"{"dependencies":{"library":"1"}}"#),
+        (
+            "pubspec.yaml",
+            "name: app",
+            "name: app\ndependencies:\n  library: any",
+        ),
+        (
+            "go.mod",
+            "module example.com/app",
+            "module example.com/app\nrequire example.com/lib v1.0.0",
+        ),
+    ] {
+        ctx.files = vec![FileDiff {
+            old_path: Some(path.into()),
+            new_path: Some(path.into()),
+            ..Default::default()
+        }];
+        ctx.contents = BTreeMap::from([(path.into(), (Some(before.into()), Some(after.into())))]);
+        assert_eq!(
+            CouplingScorer.measure(&ctx).await.unwrap().value,
+            1.,
+            "{path}"
+        );
+    }
+}
+fn xml(ccn: u32) -> String {
+    format!(
+        r#"<cppncss><measure type="Function"><item name="login(...) at ./src/auth.rs:1"><value>1</value><value>4</value><value>{ccn}</value></item></measure><measure type="File"><item name="./src/auth.rs"><value>1</value><value>4</value><value>{ccn}</value><value>1</value></item></measure></cppncss>"#
+    )
+}
+#[test]
+fn complexity_parser_ignores_summary_totals_and_rejects_invalid_reports() {
+    let report = xml(5);
+    let totals = reports::complexity(&report, Path::new("/workspace")).unwrap();
+    assert_eq!(totals["src/auth.rs"], 5.);
+    assert!(reports::complexity("<cppncss/>", Path::new("/workspace")).is_err());
+}
+#[test]
+fn diagnostic_formats_normalize_paths_and_ignore_line_shifts() {
+    let root = Path::new("/workspace");
+    let mut command = Command {
+        id: "lint".into(),
+        format: "json".into(),
+        ..Default::default()
+    };
+    let a = reports::diagnostics(
+        &command,
+        r#"[{"path":"/workspace/src/a.rs","line":4,"rule":"x","message":"unused"}]"#,
+        root,
+    )
+    .unwrap();
+    let b = reports::diagnostics(
+        &command,
+        r#"[{"path":"src/a.rs","line":44,"rule":"x","message":"unused"}]"#,
+        root,
+    )
+    .unwrap();
+    assert_eq!(a[0].key(), b[0].key());
+    command.format = "eslint".into();
+    assert_eq!(reports::diagnostics(&command,r#"[{"filePath":"src/a.ts","messages":[{"line":2,"ruleId":"unused","message":"unused variable","severity":1}]}]"#,root).unwrap().len(),1);
+    command.format = "clippy".into();
+    assert_eq!(reports::diagnostics(&command,r#"{"reason":"compiler-message","message":{"level":"warning","message":"unused","spans":[{"is_primary":true,"file_name":"src/a.rs","line_start":3}],"code":{"code":"unused"}}}"#,root).unwrap().len(),1);
+    command.format = "regex".into();
+    command.warning_regex = r"(?m)^(?P<path>[^:]+):(?P<line>\d+): (?P<message>.+)$".into();
+    assert_eq!(
+        reports::diagnostics(&command, "src/a.rs:2: warning", root).unwrap()[0].line,
+        2
+    );
+}
+fn git(root: &Path, args: &[&str]) -> String {
+    let out = Process::new("git")
+        .current_dir(root)
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+        ])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap().trim().into()
+}
+fn write(root: &Path, path: &str, text: &str) {
+    let p = root.join(path);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, text).unwrap();
+}
+#[tokio::test]
+async fn two_commit_repository_measures_all_axes_without_modifying_dirty_worktree() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "developer@example.com"]);
+    git(root, &["config", "user.name", "Developer"]);
+    write(root, "src/auth.rs", "fn login() {}\n");
+    write(root, "complexity.xml", &xml(1));
+    write(
+        root,
+        "diagnostics.json",
+        r#"[{"path":"src/auth.rs","line":1,"rule":"old","message":"old"}]"#,
+    );
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "Initial fixture"]);
+    let base = git(root, &["rev-parse", "HEAD"]);
+    write(
+        root,
+        "src/auth.rs",
+        "use crate::session;\nfn login() { session::run().unwrap(); }\n// TODO expiry\n",
+    );
+    write(root, "tests/auth.rs", "#[test] fn login_test() {}\n");
+    write(root, "complexity.xml", &xml(5));
+    write(
+        root,
+        "diagnostics.json",
+        r#"[{"path":"src/auth.rs","line":2,"rule":"old","message":"old"},{"path":"src/auth.rs","line":3,"rule":"new","message":"new"}]"#,
+    );
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "Change authentication"]);
+    let head = git(root, &["rev-parse", "HEAD"]);
+    write(root, "src/auth.rs", "uncommitted changes must stay\n");
+    let mut config = RiskConfig::default();
+    config.complexity.command = vec!["/bin/sh".into(), "-c".into(), "cat complexity.xml".into()];
+    config.lint = vec![Command {
+        id: "lint".into(),
+        command: vec!["/bin/sh".into(), "-c".into(), "cat diagnostics.json".into()],
+        format: "json".into(),
+        approved: true,
+        ..Default::default()
+    }];
+    let report = analyze(context(root, &base, &head, config.clone()).await.unwrap()).await;
+    assert_eq!(report.profile.available(), 8, "{:?}", report.profile.axes);
+    assert_eq!(
+        report.profile.axes[Axis::Complexity.index()]
+            .raw
+            .as_ref()
+            .unwrap()
+            .value,
+        4.
+    );
+    assert_eq!(
+        report.profile.axes[Axis::Lint.index()]
+            .raw
+            .as_ref()
+            .unwrap()
+            .value,
+        1.
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/auth.rs")).unwrap(),
+        "uncommitted changes must stay\n"
+    );
+    assert!(git(root, &["diff", "--cached"]).is_empty());
+    let history = mrde_git::risk::file_context(root, &base, &head, "src/auth.rs")
+        .await
+        .unwrap();
+    assert_eq!(history.commits.len(), 2);
+    assert_eq!(history.authors[0].1, 100.);
+    config.timeout_seconds = 1;
+    config.complexity.command = vec!["/bin/sh".into(), "-c".into(), "sleep 3".into()];
+    let partial = analyze(context(root, &base, &head, config).await.unwrap()).await;
+    assert!(
+        partial.profile.axes[Axis::Complexity.index()]
+            .score
+            .is_none()
+    );
+    assert_eq!(partial.profile.available(), 7);
+}

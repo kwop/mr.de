@@ -33,7 +33,7 @@ impl Cockpit {
                     .child(if busy {
                         "Listing worktrees…"
                     } else {
-                        "No worktrees. Reviews, statistics, compliance checks, and discussions create them."
+                        "No worktrees. Reviews, statistics, compliance checks, and questions to Claude create them."
                     }),
             );
         }

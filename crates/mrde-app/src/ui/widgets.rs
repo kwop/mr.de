@@ -41,7 +41,7 @@ pub(super) fn badge(text: impl Into<SharedString>, color: u32) -> Div {
     div()
         .flex_shrink_0()
         .px(px(6.))
-        .rounded(px(4.))
+        .rounded(px(RADIUS_CHIP))
         .border_1()
         .border_color(rgb(color))
         .text_size(px(11.))
@@ -52,9 +52,10 @@ pub(super) fn badge(text: impl Into<SharedString>, color: u32) -> Div {
 
 pub(super) fn card() -> Div {
     div()
+        .flex_shrink_0()
         .min_w_0()
         .p_3()
-        .rounded(px(8.))
+        .rounded(px(RADIUS_CARD))
         .border_1()
         .border_color(rgb(LINE))
         .bg(rgb(CARD))

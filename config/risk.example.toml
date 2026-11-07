@@ -1,0 +1,77 @@
+# Merge order: ~/.config/mrde/risk.toml -> ~/.config/mrde/projects/<id>/risk.toml
+# -> <repository>/risk.toml. Tables merge; arrays replace. Secrets never belong here.
+# Repository commands remain proposed until explicitly approved locally.
+baseline_count = 30 # Last merged MRs of this GitLab repository, not the whole group.
+timeout_seconds = 60 # Per scorer/command; a failure produces n/a for that axis.
+coverage_path = "coverage/lcov.info" # Optional, relative to the worktree; Cobertura XML also supported.
+# No report: explicitly labelled test-file heuristic. No modified source lines: n/a.
+exclude = ["**/vendor/**", "**/node_modules/**", "**/target/**", "**/*.lock"]
+
+# Raw measurement -> risk in 0..10. Scores must never decrease; endpoints clamp.
+[normalization]
+diff_size = [[0,0],[50,2],[300,5],[1000,8],[3000,10]]
+files = [[0,0],[3,2],[10,5],[30,8],[80,10]]
+complexity = [[0,0],[5,2],[20,5],[50,8],[100,10]]
+test_gap = [[0,0],[0.2,2],[0.5,5],[0.8,8],[1,10]]
+sensitive_paths = [[0,0],[0.1,2],[0.3,5],[0.6,8],[1,10]]
+coupling = [[0,0],[2,2],[5,5],[10,8],[20,10]]
+lint = [[0,0],[2,2],[5,5],[15,8],[30,10]]
+debt = [[0,0],[2,2],[5,5],[15,8],[30,10]]
+
+[verdict]
+deep_axis = 8 # Any measured axis at/above this score requests a deep review.
+deep_mean = 6
+standard_mean = 3.5 # Below: Quick. Partial profiles show their available-axis count.
+
+[complexity]
+id = "complexity"
+command = ["lizard", "--xml"] # Installed by the user; computes cyclomatic complexity.
+format = "lizard" # Missing executable/unsupported sources: n/a, never zero.
+
+# Weighted share of changed lines; the strongest matching glob wins per file.
+[[sensitive]]
+glob = "**/auth/**"
+weight = 1.0
+[[sensitive]]
+glob = "**/migrations/**"
+weight = 1.5
+
+# Applied only to added lines. Contributions add up; these are heuristics, not proof.
+[[debt]]
+id = "markers"
+regex = '\b(?:TODO|FIXME|HACK)\b'
+weight = 1.0
+[[debt]]
+id = "unwrap"
+regex = '\.unwrap\s*\('
+weight = 1.0
+[[debt]]
+id = "any"
+regex = '\bany\b'
+weight = 0.5
+# Optional, language-specific approximation for commented-out code:
+# [[debt]]
+# id = "commented-code"
+# regex = '^\s*//\s*(?:if\s*\(|return\b|const\s+\w+\s*=)'
+# weight = 0.5
+
+# Lint runs in disposable before/after snapshots; it never installs dependencies.
+# Only *new* diagnostics count. JSON format: {"warnings":[{"path":"src/a.rs",
+# "line":12,"rule":"rule-id","message":"description"}]}.
+# Each command runs with CARGO_NET_OFFLINE=true, npm_config_offline=true, PIP_NO_INDEX=1.
+# Configure commands that operate entirely locally; no automatic package downloads.
+# [[lint]]
+# id = "rust"
+# command = ["cargo", "clippy", "--offline", "--message-format=json"]
+# format = "clippy"
+# [[lint]]
+# id = "web"
+# command = ["node", "node_modules/eslint/bin/eslint.js", "-f", "json", "."]
+# format = "eslint"
+# [[lint]]
+# id = "custom"
+# command = ["./scripts/lint-report"]
+# format = "json"
+# Regex format requires named path and line groups; rule/message are optional:
+# format = "regex"
+# warning_regex = '^(?P<path>[^:]+):(?P<line>\d+): (?P<message>.+)$'

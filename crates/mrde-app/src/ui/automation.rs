@@ -3,7 +3,7 @@
 //! Only active with both `MRDE_SNAPSHOT_REAL=1` and `MRDE_SNAPSHOT`. It waits for the
 //! startup refresh, then opens one MR (read-only GitLab requests) and selects a tab, or
 //! opens the Worktrees (local listing) or Settings page, and signals the snapshot timer.
-//! It never starts reviews, analyses, Discuss, approvals, or saves. `MRDE_SCENARIO` uses
+//! It never starts reviews, analyses, Ask Claude, approvals, or saves. `MRDE_SCENARIO` uses
 //! the preview syntax (`queue`, `detail:<tab>`, `focus:<tab>`, `worktrees`, `settings`);
 //! `MRDE_SCENARIO_INDEX` picks the queue position (default 0).
 use super::{Cockpit, inbox::DetailTab};
@@ -84,7 +84,7 @@ impl Cockpit {
         let Some(automation) = self.automation.as_mut() else {
             return;
         };
-        let idle = self.job.is_none();
+        let idle = self.job.is_none() && self.navigation_job.is_none() && !self.initializing;
         match (automation.stage, automation.target) {
             // The startup refresh has run once (successfully or not) and nothing is busy.
             (Stage::WaitQueue, target)

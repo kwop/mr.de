@@ -51,6 +51,10 @@ pub fn score(mr: &MergeRequest, now: DateTime<Utc>) -> Score {
 pub fn sort_queue(queue: &mut [MergeRequest], sort: QueueSort, now: DateTime<Utc>) {
     queue.sort_by(|a, b| {
         match sort {
+            QueueSort::Risk => {
+                let risk = |mr: &MergeRequest| mr.risk.as_ref().filter(|r| r.head_sha == mr.sha).and_then(|r| r.mean).filter(|n| n.is_finite());
+                match (risk(a), risk(b)) { (Some(a),Some(b)) => b.total_cmp(&a), (Some(_),None) => std::cmp::Ordering::Less, (None,Some(_)) => std::cmp::Ordering::Greater, _ => score(b,now).cmp(&score(a,now)) }
+            }
             QueueSort::Priority => score(b, now).cmp(&score(a, now)),
             QueueSort::Newest => b.created_at.cmp(&a.created_at),
             QueueSort::Oldest => a.created_at.cmp(&b.created_at),
@@ -127,6 +131,7 @@ mod tests {
     #[test]
     fn user_selected_sort_orders_queue() {
         let mr = |iid: u64, day: u32, lines: Option<u64>, labels: &[&str]| MergeRequest {
+            risk: None,
             id: crate::models::MrId { project: 1, iid },
             title: String::new(),
             description: String::new(),

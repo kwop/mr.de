@@ -8,7 +8,7 @@ use gpui::{prelude::*, *};
 use gpui_component::{
     Disableable, Icon, IconName, Sizable,
     button::*,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
 };
 use mrde_core::{
     config::{Config, MrRole, QueueSort},
@@ -20,6 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use context::ContextLayout;
 use inbox::DetailTab;
 use labels::label_chip;
 
@@ -33,6 +34,8 @@ enum SettingsOperation {
 
 pub struct Cockpit {
     executor: Arc<dyn Executor>,
+    threads: Entity<crate::threads::Threads>,
+    threads_view: bool,
     image_viewer: Entity<crate::image_viewer::ImageViewer>,
     automatic: bool,
     refreshing: bool,
@@ -46,17 +49,41 @@ pub struct Cockpit {
     progress_receiver: mpsc::Receiver<(u64, String)>,
     runtime: Arc<tokio::runtime::Runtime>,
     config: Config,
+    projects: Vec<Config>,
+    projects_open: bool,
+    saved_project: Option<Config>,
+    editing_project: Option<Config>,
+    project_name: Entity<InputState>,
+    project_group: Entity<InputState>,
+    project_refresh: Entity<InputState>,
+    project_claude: Entity<InputState>,
+    draft_provider: mrde_core::config::Provider,
+    project_threads: std::collections::HashMap<String, Entity<crate::threads::Threads>>,
     queue: Vec<MergeRequest>,
     queue_page: usize,
     queue_scroll: ScrollHandle,
+    /// Search text and selected labels; pagination and navigation follow the matches.
+    filter: mrde_core::inbox::QueueFilter,
+    search: Entity<InputState>,
+    labels_expanded: bool,
+    open_dialog: bool,
+    open_input: Entity<InputState>,
+    open_error: Option<String>,
+    /// An MR requested from a link is loading; the reader shows its progress.
+    opening: bool,
+    /// Review context panel; `None` follows the window width until the user toggles it.
+    context_open: Option<bool>,
+    /// Preview scenarios pin the panel layout whatever the window width.
+    context_pinned: Option<ContextLayout>,
+    _subscriptions: Vec<Subscription>,
     detail: Option<Box<MrDetail>>,
     review: Option<Review>,
     /// Level of the displayed review; `level` is the one chosen for the next run.
     review_level: Option<ReviewLevel>,
     level: ReviewLevel,
     stats: Option<(MrId, DiffStats)>,
-    /// Render-time memo: the treemap is rebuilt only when its MR, commit, or source changes.
-    disktree_cache: std::cell::RefCell<Option<disktree::Cached>>,
+    /// Invalidates background presentation models after new detail/statistics arrive.
+    presentation_revision: u64,
     compliance: Option<(MrId, String, Compliance)>,
     insights: Option<(MrId, Box<Insights>)>,
     tour: Option<(MrId, String, Tour)>,
@@ -85,6 +112,13 @@ pub struct Cockpit {
     receiver: mpsc::Receiver<(u64, anyhow::Result<Outcome>)>,
     job: Option<tokio::task::JoinHandle<()>>,
     generation: u64,
+    navigation_sender: mpsc::Sender<(u64, anyhow::Result<Outcome>)>,
+    navigation_receiver: mpsc::Receiver<(u64, anyhow::Result<Outcome>)>,
+    navigation_job: Option<tokio::task::JoinHandle<()>>,
+    navigation_generation: u64,
+    operation_target: Option<(MrId, String)>,
+    initializing: bool,
+    _startup: Option<Task<()>>,
     cancellable: bool,
     last_refresh: Instant,
     _poll: Task<()>,
@@ -109,27 +143,83 @@ impl Cockpit {
                 cx,
             );
             cockpit.apply_preview_scenario(cx);
+            cockpit.apply_preview_inputs(window, cx);
             return cockpit;
         }
-        let (config, status) = match backend::load_config() {
-            Ok(config) => (config, "Ready".into()),
-            Err(error) => (Config::default(), error.to_string()),
-        };
-        let queue = backend::cached_queue(&config).unwrap_or_default();
         let mut cockpit = Self::with_state(
-            runtime,
+            runtime.clone(),
             Arc::new(backend::SystemExecutor::default()),
             SettingsService::system()
                 .ok()
                 .map(|s| Arc::new(s) as Arc<dyn ConnectionSettings>),
-            config,
-            queue,
-            status,
+            Config::default(),
+            vec![],
+            "Loading local configuration and cache…".into(),
             window,
             cx,
         );
+        cockpit.initialize(window, cx, || {
+            let (projects, status) = match backend::load_projects() {
+                Ok(projects) => (projects, "Ready".to_string()),
+                Err(error) => (
+                    crate::projects::Projects::single(Config::default()),
+                    error.to_string(),
+                ),
+            };
+            let config = projects.current().unwrap_or_default();
+            let queue = backend::cached_queue(&config).unwrap_or_default();
+            (config, queue, status, projects.projects)
+        });
         cockpit.automation = automation::Automation::from_env();
         cockpit
+    }
+    fn initialize(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        load: impl FnOnce() -> (Config, Vec<MergeRequest>, String, Vec<Config>) + Send + 'static,
+    ) {
+        self.initializing = true;
+        self.settings = false;
+        let work = self.runtime.spawn_blocking(load);
+        self._startup = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = work.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.initializing = false;
+                match result {
+                    Ok((config, queue, status, projects)) => {
+                        this.projects = projects;
+                        this.project_inputs(&config, window, cx);
+                        this.url.update(cx, |input, cx| {
+                            input.set_value(config.gitlab_url.clone(), window, cx)
+                        });
+                        this.spec_path.update(cx, |input, cx| {
+                            input.set_value(config.spec_path.clone(), window, cx)
+                        });
+                        this.visual_command.update(cx, |input, cx| {
+                            input.set_value(config.visual_command.clone(), window, cx)
+                        });
+                        cx.set_http_client(Arc::new(crate::images::ImageHttpClient::new(
+                            this.runtime.clone(),
+                            this.executor.clone(),
+                            config.clone(),
+                        )));
+                        this.settings |=
+                            config.gitlab_url.is_empty() || !config.provider.available();
+                        this.threads
+                            .update(cx, |threads, cx| threads.configure(config.clone(), cx));
+                        this.config = config;
+                        this.queue = queue;
+                        this.status = status;
+                    }
+                    Err(error) => {
+                        this.status = format!("Could not load local settings: {error}");
+                        this.settings = true;
+                    }
+                }
+                cx.notify();
+            });
+        }));
     }
     #[allow(clippy::too_many_arguments)]
     fn with_state(
@@ -142,6 +232,18 @@ impl Cockpit {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let project_name = cx.new(|cx| InputState::new(window, cx).placeholder("Project name"));
+        project_name.update(cx, |s, cx| s.set_value(config.name.clone(), window, cx));
+        let project_group = cx.new(|cx| InputState::new(window, cx).placeholder("All groups"));
+        project_group.update(cx, |s, cx| s.set_value(config.group.clone(), window, cx));
+        let project_refresh = cx.new(|cx| InputState::new(window, cx).placeholder("120"));
+        project_refresh.update(cx, |s, cx| {
+            s.set_value(config.refresh_seconds.to_string(), window, cx)
+        });
+        let project_claude = cx.new(|cx| InputState::new(window, cx).placeholder("claude"));
+        project_claude.update(cx, |s, cx| {
+            s.set_value(config.claude_path.clone(), window, cx)
+        });
         let url =
             cx.new(|cx| InputState::new(window, cx).placeholder("https://gitlab.example.com"));
         url.update(cx, |input, cx| {
@@ -150,7 +252,7 @@ impl Cockpit {
         let token = cx.new(|cx| {
             InputState::new(window, cx)
                 .masked(true)
-                .placeholder("GitLab personal access token")
+                .placeholder("Personal access token")
         });
         let cf_id = cx.new(|cx| {
             InputState::new(window, cx)
@@ -180,6 +282,7 @@ impl Cockpit {
             config.clone(),
         )));
         let (sender, receiver) = mpsc::channel();
+        let (navigation_sender, navigation_receiver) = mpsc::channel();
         let (progress_sender, progress_receiver) = mpsc::channel();
         let poll = cx.spawn(async move |this, cx| {
             loop {
@@ -189,7 +292,51 @@ impl Cockpit {
                 }
             }
         });
+        let threads = cx.new(|cx| {
+            crate::threads::Threads::new(runtime.clone(), executor.clone(), config.clone(), cx)
+        });
+        let search = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Search merge requests, authors, labels")
+                .clean_on_escape()
+        });
+        let open_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("https://gitlab.example.com/group/project/-/merge_requests/123")
+        });
+        let subscriptions = vec![
+            cx.subscribe(&search, |this: &mut Self, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.filter.query = input.read(cx).value().to_string();
+                    this.set_queue_page(0);
+                    cx.notify();
+                }
+            }),
+            cx.subscribe_in(
+                &open_input,
+                window,
+                |this: &mut Self, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::Change) && this.open_error.is_some() {
+                        this.open_error = None;
+                        cx.notify();
+                    }
+                },
+            ),
+        ];
+        chrome::register_shortcuts(window, cx);
         Self {
+            filter: Default::default(),
+            search,
+            labels_expanded: false,
+            open_dialog: false,
+            open_input,
+            open_error: None,
+            opening: false,
+            context_open: None,
+            context_pinned: None,
+            _subscriptions: subscriptions,
+            threads,
+            threads_view: false,
             image_viewer: crate::image_viewer::install(window, cx),
             executor,
             automatic: false,
@@ -208,6 +355,16 @@ impl Cockpit {
             detail_scroll: ScrollHandle::new(),
             detail_tab: DetailTab::Description,
             reader_focused: false,
+            projects: vec![config.clone()],
+            projects_open: false,
+            saved_project: None,
+            editing_project: None,
+            project_name,
+            project_group,
+            project_refresh,
+            project_claude,
+            draft_provider: config.provider,
+            project_threads: Default::default(),
             config,
             queue,
             queue_page: 0,
@@ -217,7 +374,7 @@ impl Cockpit {
             review_level: None,
             level: ReviewLevel::Standard,
             stats: None,
-            disktree_cache: Default::default(),
+            presentation_revision: 0,
             compliance: None,
             insights: None,
             tour: None,
@@ -239,6 +396,13 @@ impl Cockpit {
             receiver,
             job: None,
             generation: 0,
+            navigation_sender,
+            navigation_receiver,
+            navigation_job: None,
+            navigation_generation: 0,
+            operation_target: None,
+            initializing: false,
+            _startup: None,
             cancellable: false,
             last_refresh: Instant::now() - Duration::from_secs(86400),
             _poll: poll,
@@ -246,7 +410,7 @@ impl Cockpit {
     }
     /// Refresh is background work: only an explicit operation locks its controls.
     fn is_busy(&self) -> bool {
-        self.job.is_some() && !self.refreshing
+        self.initializing || (self.job.is_some() && !self.refreshing)
     }
     fn interrupt_refresh(&mut self) {
         if !self.refreshing {
@@ -263,13 +427,60 @@ impl Cockpit {
         self.status = "Refresh cancelled to handle your action.".into();
         self.log("Refresh cancelled to handle your action");
     }
+    fn cancel_navigation(&mut self) {
+        if let Some(job) = self.navigation_job.take() {
+            job.abort();
+        }
+        self.navigation_generation += 1;
+        self.opening = false;
+    }
+    fn start_navigation(&mut self, action: Action, message: &str, cx: &mut Context<Self>) {
+        if self.initializing {
+            return;
+        }
+        self.interrupt_refresh();
+        self.cancel_navigation();
+        let generation = self.navigation_generation;
+        let sender = self.navigation_sender.clone();
+        let executor = self.executor.clone();
+        let config = self.config.clone();
+        if self.job.is_none() {
+            self.status = message.into();
+        }
+        self.navigation_job = Some(self.runtime.spawn(async move {
+            let result = std::panic::AssertUnwindSafe(executor.execute(config, action))
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|_| Err(anyhow::anyhow!("Loading stopped unexpectedly")));
+            let _ = sender.send((generation, result));
+        }));
+        cx.notify();
+    }
     fn start(&mut self, action: Action, message: &str, cx: &mut Context<Self>) {
+        if matches!(
+            action,
+            Action::Select(_) | Action::Open(_) | Action::Worktrees
+        ) {
+            self.start_navigation(action, message, cx);
+            return;
+        }
         let refreshing = matches!(action, Action::Refresh);
         if self.is_busy() || (refreshing && self.job.is_some()) {
             return;
         }
         self.interrupt_refresh();
         self.refreshing = refreshing;
+        self.operation_target = match &action {
+            Action::Review(d, _)
+            | Action::Ask(d, _)
+            | Action::Approve(d)
+            | Action::Statistics(d)
+            | Action::Compliance(d)
+            | Action::Analyze(d)
+            | Action::Tour(d)
+            | Action::Visual(d) => Some((d.mr.id.clone(), d.mr.sha.clone())),
+            _ => None,
+        };
         self.status = message.into();
         self.log(message);
         self.automatic = false;
@@ -312,7 +523,15 @@ impl Cockpit {
         ));
     }
     fn draft(&self, cx: &App) -> Draft {
-        let mut config = self.config.clone();
+        let mut config = self
+            .editing_project
+            .clone()
+            .unwrap_or_else(|| self.config.clone());
+        config.name = self.project_name.read(cx).value().trim().to_string();
+        config.group = self.project_group.read(cx).value().trim().to_string();
+        config.provider = self.draft_provider;
+        config.refresh_seconds = self.project_refresh.read(cx).value().parse().unwrap_or(0);
+        config.claude_path = self.project_claude.read(cx).value().trim().to_string();
         config.gitlab_url = self.url.read(cx).value().to_string();
         config.spec_path = self.spec_path.read(cx).value().trim().to_string();
         config.visual_command = self.visual_command.read(cx).value().trim().to_string();
@@ -391,15 +610,69 @@ impl Cockpit {
                 cx.notify();
             }
         }
-        while let Ok((generation, result)) = self.receiver.try_recv() {
-            if generation != self.generation {
+        while let Some((navigation, generation, result)) = self
+            .navigation_receiver
+            .try_recv()
+            .ok()
+            .map(|(g, r)| (true, g, r))
+            .or_else(|| self.receiver.try_recv().ok().map(|(g, r)| (false, g, r)))
+        {
+            if generation
+                != if navigation {
+                    self.navigation_generation
+                } else {
+                    self.generation
+                }
+            {
                 continue;
             }
-            self.job = None;
-            self.refreshing = false;
-            self.last_refresh = Instant::now();
-            let settings_operation = self.settings_operation.take();
-            let automatic = std::mem::take(&mut self.automatic);
+            let running_status = (navigation && self.job.is_some()).then(|| self.status.clone());
+            let target = if navigation {
+                self.navigation_job = None;
+                self.opening = false;
+                None
+            } else {
+                self.job = None;
+                self.refreshing = false;
+                self.last_refresh = Instant::now();
+                self.operation_target.take()
+            };
+            let settings_operation = if navigation {
+                None
+            } else {
+                self.settings_operation.take()
+            };
+            let automatic = !navigation && std::mem::take(&mut self.automatic);
+            let same_commit = target.as_ref().is_none_or(|(id, sha)| {
+                self.detail
+                    .as_ref()
+                    .is_some_and(|d| &d.mr.id == id && &d.mr.sha == sha)
+            });
+            if !same_commit
+                && result.as_ref().is_ok_and(|r| {
+                    !matches!(
+                        r,
+                        Outcome::Approved(..) | Outcome::Ask(_) | Outcome::Done(_)
+                    )
+                })
+            {
+                self.status =
+                    "Operation completed for another MR. Reopen it to view cached results.".into();
+                self.log(&self.status.clone());
+                cx.notify();
+                continue;
+            }
+            if result.as_ref().is_ok_and(|r| {
+                matches!(
+                    r,
+                    Outcome::Detail(..)
+                        | Outcome::DetailWith(..)
+                        | Outcome::Statistics(..)
+                        | Outcome::Insights(..)
+                )
+            }) {
+                self.presentation_revision += 1;
+            }
             let succeeded = result.is_ok();
             match result {
                 Err(error) => {
@@ -423,36 +696,21 @@ impl Cockpit {
                 }
                 Ok(Outcome::SettingsSaved(config)) => {
                     self.executor.reset();
-                    cx.set_http_client(Arc::new(crate::images::ImageHttpClient::new(
-                        self.runtime.clone(),
-                        self.executor.clone(),
-                        config.clone(),
-                    )));
-                    self.config = config;
-                    self.clear_cloudflare = false;
-                    self.settings = true;
-                    self.queue.clear();
-                    self.set_queue_page(0);
-                    self.selected_mr = None;
-                    self.detail = None;
-                    self.review = None;
-                    self.status = "Settings saved".into();
-                    self.feedback = "Saved. Your credentials are in macOS Keychain and your configuration is ready.".into();
-                    self.feedback_error = false;
-                    self.log("OK  Settings saved");
-                    self.last_refresh = Instant::now() - Duration::from_secs(86400);
+                    if let Some(old) = self.projects.iter_mut().find(|p| p.id == config.id) {
+                        *old = config.clone();
+                    } else {
+                        self.projects.push(config.clone());
+                    }
+                    self.saved_project = Some(config);
                 }
-                Ok(Outcome::QueuePreferencesSaved(config)) => {
+                Ok(Outcome::QueuePreferencesSaved(config, queue)) => {
                     let roles_changed = config.mr_roles != self.config.mr_roles;
                     self.config = config;
                     self.set_queue_page(0);
-                    mrde_core::scoring::sort_queue(
-                        &mut self.queue,
-                        self.config.mr_sort,
-                        chrono::Utc::now(),
-                    );
+                    self.queue = queue;
                     self.status = "Queue preferences saved".into();
                     if roles_changed {
+                        self.cancel_navigation();
                         self.queue.clear();
                         self.set_queue_page(0);
                         self.detail = None;
@@ -463,10 +721,19 @@ impl Cockpit {
                     }
                 }
                 Ok(Outcome::Queue(queue)) => {
-                    if let Some(detail) = &self.detail
-                        && !queue
+                    // An MR opened from a link may be outside the queue: close the reader
+                    // only when its MR has a new commit or has left the queue.
+                    let listed = |queue: &[MergeRequest], detail: &MrDetail| {
+                        queue
                             .iter()
-                            .any(|mr| mr.id == detail.mr.id && mr.sha == detail.mr.sha)
+                            .find(|mr| mr.id == detail.mr.id)
+                            .map(|mr| mr.sha == detail.mr.sha)
+                    };
+                    if let Some(detail) = &self.detail
+                        && match listed(&queue, detail) {
+                            Some(same_commit) => !same_commit,
+                            None => listed(&self.queue, detail).is_some(),
+                        }
                     {
                         self.detail = None;
                         self.selected_mr = None;
@@ -553,14 +820,33 @@ impl Cockpit {
                     self.worktrees = worktrees;
                 }
                 Ok(Outcome::Approved(id, count)) => {
-                    if let Some(detail) = self.detail.as_mut().filter(|d| d.mr.id == id) {
+                    if let Some(detail) = self.detail.as_mut().filter(|d| {
+                        d.mr.id == id && target.as_ref().is_none_or(|(_, sha)| &d.mr.sha == sha)
+                    }) {
                         detail.mr.approvals = count;
                     }
-                    if let Some(mr) = self.queue.iter_mut().find(|mr| mr.id == id) {
+                    if let Some(mr) = self.queue.iter_mut().find(|mr| {
+                        mr.id == id && target.as_ref().is_none_or(|(_, sha)| &mr.sha == sha)
+                    }) {
                         mr.approvals = count;
                     }
                     self.confirm = false;
                     self.status = "Approved on GitLab.".into();
+                }
+                Ok(Outcome::Ask(ready)) => {
+                    // The thread belongs to its own MR; only show it if that MR is still open.
+                    let here = self.detail.as_ref().is_some_and(|d| d.mr.id == ready.mr);
+                    let iid = ready.mr.iid;
+                    self.threads
+                        .update(cx, |threads, cx| threads.ask(*ready, cx));
+                    if here {
+                        self.threads_view = true;
+                        self.settings = false;
+                        self.worktrees_view = false;
+                        self.status = "Claude Code is open in Threads, read-only.".into();
+                    } else {
+                        self.status = format!("Claude Code is ready in Threads for !{iid}.");
+                    }
                 }
                 Ok(Outcome::Done(message)) => {
                     self.status = message;
@@ -570,11 +856,17 @@ impl Cockpit {
             if succeeded && settings_operation.is_none() {
                 self.log(&format!("OK  {}", self.status));
             }
+            if let Some(status) = running_status {
+                self.status = status;
+            }
             cx.notify();
         }
         if self.job.is_none()
+            && self.navigation_job.is_none()
+            && !self.initializing
             && !self.settings
             && !self.confirm
+            && self.config.provider.available()
             && !self.config.gitlab_url.is_empty()
             && self.last_refresh.elapsed()
                 >= Duration::from_secs(self.config.refresh_seconds.max(30))
@@ -631,7 +923,11 @@ impl Cockpit {
         self.status = "MR loaded. Pre-review runs only on click.".into();
     }
     fn refresh(&mut self, automatic: bool, cx: &mut Context<Self>) {
-        if self.job.is_some() || self.confirm {
+        if !self.config.provider.available() {
+            return;
+        }
+        if self.job.is_some() || self.navigation_job.is_some() || self.initializing || self.confirm
+        {
             return;
         }
         self.last_refresh = Instant::now();
@@ -663,42 +959,55 @@ impl Cockpit {
         self.generation += 1;
         let generation = self.generation;
         let sender = self.sender.clone();
-        self.job = Some(self.runtime.spawn(async move {
-            let result = std::panic::AssertUnwindSafe(service.save_queue_preferences(roles, sort))
+        let mut queue = self.queue.clone();
+        let project = self.config.clone();
+        self.job =
+            Some(self.runtime.spawn(async move {
+                let result = std::panic::AssertUnwindSafe(
+                    service.save_queue_preferences(project, roles, sort),
+                )
                 .catch_unwind()
                 .await
                 .unwrap_or_else(|_| Err(anyhow::anyhow!("Queue preferences could not be saved")))
-                .map(Outcome::QueuePreferencesSaved);
-            let _ = sender.send((generation, result));
-        }));
+                .map(|config| {
+                    mrde_core::scoring::sort_queue(&mut queue, config.mr_sort, chrono::Utc::now());
+                    Outcome::QueuePreferencesSaved(config, queue)
+                });
+                let _ = sender.send((generation, result));
+            }));
         cx.notify();
     }
     fn queue_page_count(&self) -> usize {
-        self.queue.len().div_ceil(QUEUE_PAGE_SIZE).max(1)
+        self.visible_queue().len().div_ceil(QUEUE_PAGE_SIZE).max(1)
     }
     fn set_queue_page(&mut self, page: usize) {
         self.queue_page = page.min(self.queue_page_count() - 1);
         self.queue_scroll.set_offset(point(px(0.), px(0.)));
     }
+    /// Positions in [`Self::visible_queue`] shown on the current page.
     fn queue_page_range(&self) -> std::ops::Range<usize> {
         let start = self.queue_page.min(self.queue_page_count() - 1) * QUEUE_PAGE_SIZE;
-        start..(start + QUEUE_PAGE_SIZE).min(self.queue.len())
+        start..(start + QUEUE_PAGE_SIZE).min(self.visible_queue().len())
     }
     fn queue_pagination(&self, cx: &mut Context<Self>) -> AnyElement {
         let range = self.queue_page_range();
-        let disabled = self.is_busy() || self.confirm;
+        let total = self.visible_queue().len();
+        let disabled = self.confirm;
         div()
             .debug_selector(|| "queue-pagination".into())
             .flex()
             .items_center()
             .gap_2()
-            .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child(
-                if self.queue.is_empty() {
-                    "0 results".into()
-                } else {
-                    format!("{}–{} of {}", range.start + 1, range.end, self.queue.len())
-                },
-            ))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(rgb(MUTED))
+                    .child(if total == 0 {
+                        "0 results".into()
+                    } else {
+                        format!("{}–{} of {total}", range.start + 1, range.end)
+                    }),
+            )
             .child(
                 div().debug_selector(|| "previous-page".into()).child(
                     Button::new("previous-page")
@@ -728,14 +1037,11 @@ impl Cockpit {
             .into_any_element()
     }
     fn queue_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let disabled = self.is_busy() || self.confirm || self.config.gitlab_url.is_empty();
-        let mut roles = div().flex().items_center().gap_1().child(
-            div()
-                .text_size(px(12.))
-                .text_color(rgb(MUTED))
-                .mr_1()
-                .child("Show"),
-        );
+        let disabled = self.is_busy()
+            || self.confirm
+            || self.config.gitlab_url.is_empty()
+            || !self.config.provider.available();
+        let mut roles = segmented();
         for (index, role) in MrRole::ALL.into_iter().enumerate() {
             let checked = self.config.mr_roles.contains(&role);
             roles = roles.child(
@@ -745,6 +1051,7 @@ impl Cockpit {
                         Button::new(("queue-role", index))
                             .small()
                             .ghost()
+                            .rounded(px(RADIUS_CHIP + 1.))
                             .label(role.label())
                             .when(checked, |b| b.bg(rgb(SELECTED)).text_color(rgb(HEADING)))
                             .disabled(disabled || (checked && self.config.mr_roles.len() == 1))
@@ -764,15 +1071,10 @@ impl Cockpit {
                     ),
             );
         }
-        let mut sorts = div().flex().items_center().gap_1().child(
-            div()
-                .text_size(px(12.))
-                .text_color(rgb(MUTED))
-                .mr_1()
-                .child("Sort"),
-        );
+        let mut sorts = segmented();
         for (index, sort) in QueueSort::ALL.into_iter().enumerate() {
             let label = match sort {
+                QueueSort::Risk => "Risk",
                 QueueSort::Priority => "Priority",
                 QueueSort::Newest => "Newest",
                 QueueSort::Oldest => "Oldest",
@@ -785,6 +1087,7 @@ impl Cockpit {
                         Button::new(("queue-sort", index))
                             .small()
                             .ghost()
+                            .rounded(px(RADIUS_CHIP + 1.))
                             .label(label)
                             .when(self.config.mr_sort == sort, |b| {
                                 b.bg(rgb(SELECTED)).text_color(rgb(HEADING))
@@ -803,6 +1106,7 @@ impl Cockpit {
         div()
             .debug_selector(|| "queue-toolbar".into())
             .bg(rgb(TOOLBAR))
+            .rounded_t(px(RADIUS_SHEET))
             .flex_shrink_0()
             .px_5()
             .py_2()
@@ -829,10 +1133,33 @@ impl Cockpit {
                             )
                             .child(
                                 div()
+                                    .debug_selector(|| "queue-count".into())
                                     .text_size(px(12.))
                                     .text_color(rgb(MUTED))
-                                    .child(format!("{} open", self.queue.len())),
-                            ),
+                                    .child(if self.filter.is_active() {
+                                        format!(
+                                            "{} of {} open",
+                                            self.visible_queue().len(),
+                                            self.queue.len()
+                                        )
+                                    } else {
+                                        format!("{} open", self.queue.len())
+                                    }),
+                            )
+                            .when(self.filter.is_active(), |row| {
+                                row.child(
+                                    div().debug_selector(|| "clear-filters".into()).child(
+                                        Button::new("clear-filters")
+                                            .small()
+                                            .ghost()
+                                            .icon(IconName::Close)
+                                            .label("Clear filters")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.clear_filters(window, cx)
+                                            })),
+                                    ),
+                                )
+                            }),
                     )
                     .child(
                         div()
@@ -861,13 +1188,37 @@ impl Cockpit {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .child(roles)
-                    .child(sorts),
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(rgb(MUTED))
+                                    .child("Show"),
+                            )
+                            .child(roles),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(rgb(MUTED))
+                                    .child("Sort"),
+                            )
+                            .child(sorts),
+                    ),
             )
             .into_any_element()
     }
     fn settings_view(&self, cx: &mut Context<Self>) -> AnyElement {
-        let busy = self.is_busy();
+        let busy = self.initializing || self.settings_operation.is_some();
         let row = |label: &'static str, hint: &'static str, control: AnyElement| {
             div()
                 .flex()
@@ -902,16 +1253,22 @@ impl Cockpit {
                             .disabled(busy)
                             .bg(rgb(FIELD))
                             .text_size(px(UI_SIZE))
-                            .rounded(px(7.))
+                            .rounded(px(RADIUS_CONTROL))
                             .h(px(34.)),
                     )
                     .into_any_element(),
             )
         };
         let content = div().w_full().max_w(px(920.)).px(px(56.)).py(px(42.)).flex().flex_col()
-            .child(div().text_size(px(20.)).text_color(rgb(HEADING)).font_weight(FontWeight::MEDIUM).mb_2().child("GitLab"))
+            .child(div().text_size(px(20.)).text_color(rgb(HEADING)).font_weight(FontWeight::MEDIUM).mb_2().child(if self.editing_project.is_some() { "New project" } else { "Project settings" }))
             .child(div().text_sm().text_color(rgb(MUTED)).mb_8().child("Connect your review workspace."))
-            .child(field("Instance URL", "Your self-hosted GitLab instance.", &self.url, "gitlab-url"))
+            .child(field("Project name", "A name for this review workspace.", &self.project_name, "project-name"))
+            .child(row("Provider", "Choose the service that hosts your code.", self.provider_control(cx)))
+            .when(!self.draft_provider.available(), |d| d.child(div().text_sm().text_color(rgb(MUTED)).pb_4().child("GitHub connector coming later. You can save this profile; pull requests and connection testing are not available yet.")))
+            .child(field("Instance URL", "The base URL of your forge.", &self.url, "gitlab-url"))
+            .child(field("Group / organization", "Optional path, for example team/platform. GitLab includes subgroups.", &self.project_group, "project-group"))
+            .child(field("Refresh interval", "Seconds between refreshes, at least 30.", &self.project_refresh, "project-refresh"))
+            .child(field("Claude executable", "Command or full path to Claude Code.", &self.project_claude, "project-claude"))
             .child(field("Personal access token", "API access for merge requests and approvals.", &self.token, "gitlab-token"))
             .child(div().text_sm().text_color(rgb(MUTED)).pb_6().child("Leave a secret blank to keep its saved value. Entered values remain visible as masked text."))
             .child(div().h(px(1.)).bg(rgb(LINE)).my_3())
@@ -943,7 +1300,7 @@ impl Cockpit {
                             Button::new("test-connection")
                                 .label("Test connection")
                                 .loading(self.settings_operation == Some(SettingsOperation::Test))
-                                .disabled(busy)
+                                .disabled(self.is_busy() || !self.draft_provider.available())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.start_settings(SettingsOperation::Test, cx)
                                 })),
@@ -955,7 +1312,7 @@ impl Cockpit {
                                 .primary()
                                 .label("Save")
                                 .loading(self.settings_operation == Some(SettingsOperation::Save))
-                                .disabled(busy)
+                                .disabled(self.is_busy())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.start_settings(SettingsOperation::Save, cx)
                                 })),
@@ -974,7 +1331,7 @@ impl Cockpit {
                     .debug_selector(|| "settings-feedback".into())
                     .mt_4()
                     .p_3()
-                    .rounded(px(8.))
+                    .rounded(px(RADIUS_CARD))
                     .bg(rgb(if self.feedback_error {
                         ERROR_BG
                     } else {
@@ -1001,132 +1358,14 @@ impl Cockpit {
             .child(controls)
             .into_any_element()
     }
-    fn sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .debug_selector(|| "navigation".into())
-            .text_size(px(13.))
-            .w(px(SIDEBAR_WIDTH))
-            .flex_shrink_0()
-            .h_full()
-            .border_r_1()
-            .border_color(rgb(PANEL_LINE))
-            .bg(rgb(SIDEBAR))
-            .px_3()
-            .py_5()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .px_3()
-                    .text_xs()
-                    .text_color(rgb(MUTED))
-                    .mb_2()
-                    .child("Workspace"),
-            )
-            .child(
-                div()
-                    .id("nav-queue")
-                    .debug_selector(|| "nav-queue".into())
-                    .h_9()
-                    .px_3()
-                    .rounded(px(8.))
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .bg(rgb(if !self.settings && !self.worktrees_view {
-                        SELECTED
-                    } else {
-                        SIDEBAR
-                    }))
-                    .cursor_pointer()
-                    .child(Icon::new(IconName::Inbox).size_4())
-                    .child("Merge requests")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if !this.is_busy() {
-                            this.settings = false;
-                            this.worktrees_view = false;
-                            cx.notify();
-                        }
-                    })),
-            )
-            .child(
-                div()
-                    .id("nav-worktrees")
-                    .debug_selector(|| "nav-worktrees".into())
-                    .h_9()
-                    .px_3()
-                    .rounded(px(8.))
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .bg(rgb(if self.worktrees_view && !self.settings {
-                        SELECTED
-                    } else {
-                        SIDEBAR
-                    }))
-                    .cursor_pointer()
-                    .child(Icon::new(IconName::Folder).size_4())
-                    .child("Worktrees")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if !this.is_busy() && !this.confirm {
-                            this.settings = false;
-                            this.worktrees_view = true;
-                            this.start(Action::Worktrees, "Listing worktrees…", cx);
-                        }
-                    })),
-            )
-            .child(
-                div()
-                    .px_3()
-                    .text_xs()
-                    .text_color(rgb(MUTED))
-                    .mt_8()
-                    .mb_2()
-                    .child("Settings"),
-            )
-            .child(
-                div()
-                    .id("nav-settings")
-                    .debug_selector(|| "nav-settings".into())
-                    .h_9()
-                    .px_3()
-                    .rounded(px(8.))
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .bg(rgb(if self.settings { SELECTED } else { SIDEBAR }))
-                    .cursor_pointer()
-                    .child(Icon::new(IconName::Settings).size_4())
-                    .child("GitLab")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if !this.is_busy() {
-                            this.settings = true;
-                            this.worktrees_view = false;
-                            cx.notify();
-                        }
-                    })),
-            )
-            .child(div().flex_1())
-            .child(
-                div()
-                    .px_3()
-                    .text_xs()
-                    .text_color(rgb(MUTED))
-                    .child("Local workspace"),
-            )
-            .child(div().px_3().text_sm().child("macOS · SSH"))
-            .into_any_element()
-    }
     fn debug_panel(&self) -> AnyElement {
         div()
             .id("debug-log")
             .debug_selector(|| "debug-panel".into())
             .h(px(168.))
             .flex_shrink_0()
-            .bg(rgb(PAGE))
-            .border_t_1()
-            .border_color(rgb(LINE))
+            .bg(rgb(QUEUE))
+            .rounded(px(RADIUS_SHEET))
             .overflow_y_scroll()
             .px_5()
             .py_3()
@@ -1151,9 +1390,11 @@ impl Cockpit {
             .overflow_y_scroll()
             .flex()
             .flex_col();
-        if self.queue.is_empty() {
+        let visible = self.visible_queue();
+        if visible.is_empty() {
             list = list.child(
                 div()
+                    .debug_selector(|| "queue-empty".into())
                     .flex_1()
                     .flex()
                     .flex_col()
@@ -1162,12 +1403,20 @@ impl Cockpit {
                     .gap_2()
                     .text_color(rgb(MUTED))
                     .child(
-                        Icon::new(IconName::Inbox)
-                            .size(px(24.))
-                            .text_color(rgb(SUBTLE)),
+                        Icon::new(if self.queue.is_empty() {
+                            IconName::Inbox
+                        } else {
+                            IconName::Search
+                        })
+                        .size(px(24.))
+                        .text_color(rgb(SUBTLE)),
                     )
-                    .child(if self.job.is_some() {
+                    .child(if !self.queue.is_empty() {
+                        "No merge request matches your search and labels."
+                    } else if self.job.is_some() || self.initializing {
                         "Loading merge requests…"
+                    } else if !self.config.provider.available() {
+                        "GitHub profile saved. The GitHub connector is not available yet."
                     } else if self.config.gitlab_url.is_empty() {
                         "Connect GitLab in Settings to load your merge requests."
                     } else {
@@ -1175,7 +1424,10 @@ impl Cockpit {
                     }),
             );
         }
-        for mr in &self.queue[self.queue_page_range()] {
+        for mr in visible[self.queue_page_range()]
+            .iter()
+            .map(|&index| &self.queue[index])
+        {
             let id = mr.id.clone();
             let selected = self.selected_mr.as_ref() == Some(&id)
                 || self.detail.as_ref().is_some_and(|d| d.mr.id == id);
@@ -1388,113 +1640,142 @@ impl Cockpit {
         }
         panel.into_any_element()
     }
-    fn files_view(&self, detail: &MrDetail) -> AnyElement {
-        let stats = self.file_stats(detail);
-        let widest = stats.iter().map(|f| f.changed()).max().unwrap_or(1).max(1);
-        let files = div()
+    fn files_view(
+        &self,
+        detail: &MrDetail,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(cache) = self.disktree_cached(detail, window, cx) else {
+            return div().child("Preparing file statistics…").into_any_element();
+        };
+        let count = detail.files.len();
+        div()
             .debug_selector(|| "changed-files-list".into())
             .w_full()
+            .child(
+                uniform_list(
+                    SharedString::from(format!(
+                        "files-{}-{}-{}",
+                        detail.mr.id.project, detail.mr.id.iid, detail.mr.sha
+                    )),
+                    count,
+                    cx.processor(move |this, range: std::ops::Range<usize>, _, _| {
+                        let Some(detail) = &this.detail else {
+                            return vec![];
+                        };
+                        range
+                            .filter_map(|index| {
+                                detail.files.get(index).map(|file| {
+                                    let stat =
+                                        cache.lookup.get(&file.new_path).map(|i| &cache.files[*i]);
+                                    Self::file_row(file, stat, cache.widest, index)
+                                })
+                            })
+                            .collect()
+                    }),
+                )
+                .w_full()
+                .h(px((count as f32 * 40.).min(480.))),
+            )
+            .into_any_element()
+    }
+    fn file_row(file: &ChangedFile, stat: Option<&FileStat>, widest: u64, index: usize) -> Div {
+        let (directory, name) = match file.new_path.rsplit_once('/') {
+            Some((directory, name)) => (format!("{directory}/"), name.to_string()),
+            None => (String::new(), file.new_path.clone()),
+        };
+        let renamed = file.old_path != file.new_path;
+        let bar = stat.map(|s| {
+            let width = 64. * s.changed() as f32 / widest as f32;
+            let added = if s.changed() == 0 {
+                0.
+            } else {
+                width * s.added as f32 / s.changed() as f32
+            };
+            div()
+                .w(px(64.))
+                .h(px(6.))
+                .flex_shrink_0()
+                .rounded(px(3.))
+                .bg(rgb(FIELD))
+                .flex()
+                .child(div().w(px(added)).h_full().bg(rgb(SUCCESS)))
+                .child(div().w(px(width - added)).h_full().bg(rgb(ERROR)))
+        });
+        div()
+            .debug_selector(move || format!("changed-file-{index}"))
+            .w_full()
             .flex()
-            .flex_col()
-            .children(detail.files.iter().enumerate().map(|(index, file)| {
-                let stat = stats.iter().find(|s| s.path == file.new_path);
-                let (directory, name) = match file.new_path.rsplit_once('/') {
-                    Some((directory, name)) => (format!("{directory}/"), name.to_string()),
-                    None => (String::new(), file.new_path.clone()),
-                };
-                let renamed = file.old_path != file.new_path;
-                let bar = stat.map(|s| {
-                    let width = 64. * s.changed() as f32 / widest as f32;
-                    let added = if s.changed() == 0 {
-                        0.
-                    } else {
-                        width * s.added as f32 / s.changed() as f32
-                    };
-                    div()
-                        .w(px(64.))
-                        .h(px(6.))
-                        .flex_shrink_0()
-                        .rounded(px(3.))
-                        .bg(rgb(FIELD))
-                        .flex()
-                        .child(div().w(px(added)).h_full().bg(rgb(SUCCESS)))
-                        .child(div().w(px(width - added)).h_full().bg(rgb(ERROR)))
-                });
+            .items_center()
+            .gap_3()
+            .h(px(40.))
+            .border_b_1()
+            .border_color(rgb(LINE))
+            .child(
+                Icon::new(IconName::File)
+                    .size(px(14.))
+                    .flex_shrink_0()
+                    .text_color(rgb(SUBTLE)),
+            )
+            .child(
                 div()
-                    .debug_selector(move || format!("changed-file-{index}"))
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(rgb(LINE))
+                    .flex_1()
+                    .min_w_0()
+                    .one_line()
+                    .font_family(CODE_FONT)
+                    .text_size(px(CODE_SIZE))
                     .child(
-                        Icon::new(IconName::File)
-                            .size(px(14.))
-                            .flex_shrink_0()
-                            .text_color(rgb(SUBTLE)),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .one_line()
-                            .font_family(CODE_FONT)
-                            .text_size(px(CODE_SIZE))
-                            .child(
-                                crate::ellipsis::ellipsis(format!("{directory}{name}")).colors([
-                                    (0..directory.len(), rgb(SUBTLE).into()),
-                                    (
-                                        directory.len()..directory.len() + name.len(),
-                                        rgb(INK).into(),
-                                    ),
-                                ]),
+                        crate::ellipsis::ellipsis(format!("{directory}{name}")).colors([
+                            (0..directory.len(), rgb(SUBTLE).into()),
+                            (
+                                directory.len()..directory.len() + name.len(),
+                                rgb(INK).into(),
                             ),
-                    )
-                    .when(renamed, |row| {
-                        row.child(
+                        ]),
+                    ),
+            )
+            .when(renamed, |row| {
+                row.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_size(px(11.))
+                        .text_color(rgb(WARNING))
+                        .child("renamed"),
+                )
+            })
+            .when(file.too_large || file.collapsed, |row| {
+                row.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_size(px(11.))
+                        .text_color(rgb(WARNING))
+                        .child("truncated by GitLab"),
+                )
+            })
+            .when_some(stat, |row, stat| {
+                row.child(
+                    div()
+                        .w(px(96.))
+                        .flex_shrink_0()
+                        .flex()
+                        .justify_end()
+                        .gap_2()
+                        .font_family(CODE_FONT)
+                        .text_size(px(11.))
+                        .child(
                             div()
-                                .flex_shrink_0()
-                                .text_size(px(11.))
-                                .text_color(rgb(WARNING))
-                                .child("renamed"),
+                                .text_color(rgb(SUCCESS))
+                                .child(format!("+{}", stat.added)),
                         )
-                    })
-                    .when(file.too_large || file.collapsed, |row| {
-                        row.child(
+                        .child(
                             div()
-                                .flex_shrink_0()
-                                .text_size(px(11.))
-                                .text_color(rgb(WARNING))
-                                .child("truncated by GitLab"),
-                        )
-                    })
-                    .when_some(stat, |row, stat| {
-                        row.child(
-                            div()
-                                .w(px(96.))
-                                .flex_shrink_0()
-                                .flex()
-                                .justify_end()
-                                .gap_2()
-                                .font_family(CODE_FONT)
-                                .text_size(px(11.))
-                                .child(
-                                    div()
-                                        .text_color(rgb(SUCCESS))
-                                        .child(format!("+{}", stat.added)),
-                                )
-                                .child(
-                                    div()
-                                        .text_color(rgb(ERROR))
-                                        .child(format!("−{}", stat.removed)),
-                                ),
-                        )
-                    })
-                    .children(bar)
-            }));
-        files.into_any_element()
+                                .text_color(rgb(ERROR))
+                                .child(format!("−{}", stat.removed)),
+                        ),
+                )
+            })
+            .children(bar)
     }
     fn review_view(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.detail.is_none() {
@@ -1665,14 +1946,23 @@ impl Cockpit {
         panel.into_any_element()
     }
 }
-/// Shared inset surface: visible boundary, with content clipped to its rounded corners.
+/// A rounded sheet on the page, with content clipped to its corners.
 fn panel_surface(background: u32) -> Div {
     div()
         .bg(rgb(background))
-        .border_1()
-        .border_color(rgb(PANEL_LINE))
-        .rounded(px(10.))
+        .rounded(px(RADIUS_SHEET))
         .overflow_hidden()
+}
+
+/// A rounded group of adjoining toggle buttons.
+fn segmented() -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(2.))
+        .p(px(2.))
+        .rounded(px(RADIUS_CONTROL))
+        .bg(rgb(QUEUE))
 }
 
 fn status_dot(color: u32, hollow: bool) -> Div {
@@ -1708,6 +1998,7 @@ fn section_label(text: &'static str) -> Div {
 
 impl Drop for Cockpit {
     fn drop(&mut self) {
+        self.cancel_navigation();
         if let Some(job) = &self.job {
             job.abort();
         }
@@ -1715,14 +2006,36 @@ impl Drop for Cockpit {
 }
 impl Render for Cockpit {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut main = div()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .px_3()
-            .pt_2()
-            .flex()
-            .flex_col();
+        if let Some(config) = self.saved_project.take() {
+            let views = (self.settings, self.worktrees_view, self.threads_view);
+            let secrets = [
+                self.token.read(cx).value().to_string(),
+                self.cf_id.read(cx).value().to_string(),
+                self.cf_secret.read(cx).value().to_string(),
+            ];
+            if self.config.namespace() == config.namespace() {
+                self.threads
+                    .update(cx, |t, cx| t.configure(config.clone(), cx));
+            }
+            self.activate_project(config, window, cx);
+            for (input, value) in [&self.token, &self.cf_id, &self.cf_secret]
+                .into_iter()
+                .zip(secrets)
+            {
+                input.update(cx, |s, cx| s.set_value(value, window, cx));
+            }
+            (self.settings, self.worktrees_view, self.threads_view) = views;
+            self.status = "Project saved".into();
+            self.feedback =
+                "Saved. Project configuration is ready; credentials are in macOS Keychain.".into();
+            self.feedback_error = false;
+            self.log("OK  Project saved");
+        }
+        self.threads.update(cx, |threads, cx| {
+            threads.set_visible(self.threads_view && !self.settings, cx)
+        });
+        let layout = self.context_layout(window.viewport_size().width);
+        let mut main = div().flex_1().min_w_0().h_full().flex().flex_col().gap_2();
         if self.settings {
             main = main.child(
                 panel_surface(READING)
@@ -1731,6 +2044,13 @@ impl Render for Cockpit {
                     .flex()
                     .flex_col()
                     .child(self.settings_view(cx)),
+            );
+        } else if self.threads_view {
+            main = main.child(
+                panel_surface(READING)
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.threads.clone()),
             );
         } else if self.worktrees_view {
             main = main.child(
@@ -1742,44 +2062,79 @@ impl Render for Cockpit {
                     .child(self.worktrees_view(cx)),
             );
         } else {
-            let reading_open = self.selected_mr.is_some() || self.detail.is_some();
-            let queue = panel_surface(QUEUE)
+            // Queue and reader share one rounded sheet, the queue above.
+            let reading_open = self.selected_mr.is_some() || self.detail.is_some() || self.opening;
+            let show_queue = !reading_open || !self.reader_focused;
+            // GPUI clips children to rectangles: surfaces touching the sheet's corners
+            // round themselves, and the last rows stop short of the bottom corners.
+            let queue = div()
                 .debug_selector(|| "queue-panel".into())
+                .bg(rgb(QUEUE))
+                .rounded_t(px(RADIUS_SHEET))
                 .min_h_0()
                 .flex()
                 .flex_col()
                 .when(reading_open, |d| {
                     d.h(px(260.)).max_h(relative(0.40)).flex_shrink_0()
                 })
-                .when(!reading_open, |d| d.flex_1())
+                .when(!reading_open, |d| {
+                    d.flex_1().rounded_b(px(RADIUS_SHEET)).pb(px(6.))
+                })
                 .child(self.queue_toolbar(cx))
                 .child(div().flex_1().min_h_0().child(self.queue_view(cx)));
-            let mut inbox = div()
+            let mut sheet = panel_surface(READING)
+                .debug_selector(|| "inbox-sheet".into())
                 .flex_1()
                 .min_h_0()
                 .flex()
                 .flex_col()
-                .gap_2()
-                .when(!reading_open || !self.reader_focused, |d| d.child(queue));
+                .when(show_queue, |d| d.child(queue));
             if reading_open {
-                let reading = panel_surface(READING)
-                    .debug_selector(|| "reading-pane".into())
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.reader_toolbar(cx))
-                    .when(self.confirm, |d| d.child(self.approval_confirmation(cx)))
-                    .child(self.detail_view(window, cx));
-                inbox = inbox.child(reading);
+                sheet = sheet.child(
+                    div()
+                        .debug_selector(|| "reading-pane".into())
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_h_0()
+                        .when(show_queue, |d| d.border_t_1().border_color(rgb(PANEL_LINE)))
+                        .child(self.reader_toolbar(cx))
+                        .when(self.confirm, |d| d.child(self.approval_confirmation(cx)))
+                        .child(self.detail_view(window, cx)),
+                );
             }
-            main = main.child(inbox);
+            main = main.child(sheet);
         }
         if self.logs_open {
             main = main.child(self.debug_panel());
         }
+        let mut body = div()
+            .flex()
+            .flex_1()
+            .min_h_0()
+            .pr_3()
+            .child(self.sidebar(cx))
+            .child(main);
+        match layout {
+            ContextLayout::Docked => {
+                body = body.child(div().h_full().pl_3().child(self.context_panel(false, cx)));
+            }
+            ContextLayout::Rail => {
+                body = body.child(div().h_full().pl_2().child(self.context_rail(cx)));
+            }
+            ContextLayout::Overlay | ContextLayout::Hidden => {}
+        }
+        // On narrow windows the open panel floats over the reader instead of squeezing it.
+        let overlay = (layout == ContextLayout::Overlay).then(|| {
+            div()
+                .absolute()
+                .top(px(TITLEBAR_HEIGHT))
+                .bottom(px(44.))
+                .right(px(12.))
+                .child(self.context_panel(true, cx))
+        });
         let mut footer = div()
-            .h(px(38.))
+            .h(px(36.))
             .flex_shrink_0()
             .bg(rgb(PAGE))
             .px_4()
@@ -1836,42 +2191,6 @@ impl Render for Cockpit {
                 .text_color(rgb(SUBTLE))
                 .child(concat!("v", env!("CARGO_PKG_VERSION"))),
         );
-        main = main.child(footer);
-        let titlebar = div()
-            .h(px(42.))
-            .flex_shrink_0()
-            .flex()
-            .items_center()
-            .window_control_area(WindowControlArea::Drag)
-            .child(
-                div()
-                    .w(px(SIDEBAR_WIDTH))
-                    .h_full()
-                    .flex_shrink_0()
-                    .bg(rgb(SIDEBAR))
-                    .border_r_1()
-                    .border_color(rgb(PANEL_LINE))
-                    .pl(px(98.))
-                    .flex()
-                    .items_center()
-                    .text_size(px(12.))
-                    .text_color(rgb(SUBTLE))
-                    .child("mr.de"),
-            )
-            .child(
-                div()
-                    .px_5()
-                    .text_size(px(12.))
-                    .text_color(rgb(SUBTLE))
-                    .child(if self.settings {
-                        "GitLab settings".to_string()
-                    } else {
-                        self.detail
-                            .as_ref()
-                            .map(|d| d.mr.project.clone())
-                            .unwrap_or_else(|| "Review workspace".into())
-                    }),
-            );
         div()
             .relative()
             .size_full()
@@ -1882,26 +2201,25 @@ impl Render for Cockpit {
             .line_height(px(20.))
             .flex()
             .flex_col()
-            .child(titlebar)
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.sidebar(cx))
-                    .child(main),
-            )
+            .child(self.titlebar(window, cx))
+            .child(body)
+            .child(footer)
+            .children(overlay)
+            .when(self.open_dialog, |d| d.child(self.open_dialog_view(cx)))
             .child(self.image_viewer.clone())
     }
 }
 
 mod actions;
 mod automation;
+mod chrome;
+mod context;
 mod disktree;
 mod history;
 mod inbox;
 mod labels;
 mod preview;
+mod projects;
 mod risks;
 mod structure;
 mod visual;

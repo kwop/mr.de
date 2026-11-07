@@ -1,0 +1,26 @@
+# Copy to ~/.config/mrde/projects.toml. Restart after editing by hand.
+# Use stable, unique IDs. "default" is reserved for the imported legacy connection.
+version = 1
+active = "platform"
+
+[[projects]]
+id = "platform"
+name = "Platform"
+provider = "gitlab"
+url = "https://gitlab.example.com"
+group = "team/platform" # optional; includes subgroups; empty means all groups
+refresh_seconds = 120
+claude_path = "claude"
+mr_roles = ["reviewer", "assignee"]
+mr_sort = "priority"
+spec_path = ""
+visual_command = ""
+
+[[projects]]
+id = "community"
+name = "Community"
+provider = "github" # profile only; connector not available yet
+url = "https://github.com"
+group = "example-org"
+# All other non-secret options default independently for this project.
+# Enter tokens and Cloudflare credentials in the UI; they belong only in Keychain.

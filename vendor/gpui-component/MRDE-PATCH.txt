@@ -26,3 +26,7 @@ Root spacing (src/text/node.rs, render_block for Node::Root): each root block re
 `is_last` for its own position. Upstream passed `is_last: true` to every block of a
 non-scrollable TextView, so paragraphs, lists, and tables lost their bottom gap and
 headings touched the preceding text.
+
+Initial parsing (src/text/text_view.rs, request_layout): parse_content runs on the
+background executor before UpdateFuture. The UI receiver is installed first, and initial
+and later results share the same ordered channel. Layout never parses/highlights inline.
