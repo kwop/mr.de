@@ -21,6 +21,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "process", "time", "sync
 tracing = "0.1"
 url = { version = "2", features = ["serde"] }
 mrde-core = { path = "crates/mrde-core" }
+mrde-service = { path = "crates/mrde-service" }
 mrde-forge = { path = "crates/mrde-forge" }
 mrde-git = { path = "crates/mrde-git" }
 mrde-insights = { path = "crates/mrde-insights" }

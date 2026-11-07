@@ -1,0 +1,32 @@
+[package]
+name = "mrde-service"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+mrde-core.workspace = true
+mrde-forge.workspace = true
+mrde-git.workspace = true
+mrde-claude.workspace = true
+mrde-insights.workspace = true
+mrde-store.workspace = true
+mrde-resolver.workspace = true
+mrde-risk.workspace = true
+futures-util = "0.3"
+toml = "0.8"
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = "3"

@@ -3728,6 +3728,7 @@ dependencies = [
  "mrde-insights",
  "mrde-resolver",
  "mrde-risk",
+ "mrde-service",
  "mrde-store",
  "png 0.18.1",
  "serde",
@@ -3891,6 +3892,31 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "mrde-service"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "mrde-claude",
+ "mrde-core",
+ "mrde-forge",
+ "mrde-git",
+ "mrde-insights",
+ "mrde-resolver",
+ "mrde-risk",
+ "mrde-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "wiremock",
 ]
 
 [[package]]
