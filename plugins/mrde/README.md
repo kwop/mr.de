@@ -52,7 +52,7 @@ Locally configured commands are trusted in that mode; repository-proposed comman
 explicit approval of their fingerprint. Missing measurements stay n/a. Local checks are
 ordinary processes, not an OS sandbox, so run commands you trust.
 
-The skill is manual, with no hooks or automatic invocation. It reports eight axes, evidence,
+The skill is manual, with no hooks or automatic invocation. It reports nine axes, evidence,
 a verdict and limitations; the model explains the measurements rather than inventing them.
 Team medians are unavailable in standalone scans. The configured coverage report is not
 verified for freshness. No files are fetched, no forge approval is sent, and no change is

@@ -85,7 +85,7 @@ of the same computed report. Text strips control characters from repository/tool
 | `schema_version`, `tool_version` | Wire-format version and producing binary version |
 | `input` | Repository, mode, requested refs, original HEAD, analyzed tree and check opt-in |
 | `summary` | `Quick`/`Standard`/`Deep` verdict or null, mean or null, measured count, partial flag |
-| `report.profile` | Eight axes, raw metrics, normalized scores, evidence, reasons for n/a, SHAs and config fingerprint |
+| `report.profile` | Nine axes, raw metrics, normalized scores, evidence, reasons for n/a, SHAs and config fingerprint |
 | `report.stats`, `report.excluded` | Changed-file counts and paths excluded from scoring |
 | `report.pending_commands` | Unapproved command ID, argv, package directory, preparation recipe and exact fingerprint |
 | `report.setup_messages` | Explicit preparation results and recovery guidance |

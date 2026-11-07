@@ -22,7 +22,7 @@ pub fn text(report: &ScanReport) -> String {
         .map_or_else(|| "n/a".into(), |v| format!("{v:.1}/10"));
     let _ = writeln!(
         out,
-        "{verdict} review · mean {mean} · {}/8 measured axes{}\n",
+        "{verdict} review · mean {mean} · {}/9 measured axes{}\n",
         summary.measured_axes,
         if summary.partial { " · partial" } else { "" }
     );
@@ -66,17 +66,18 @@ pub fn text(report: &ScanReport) -> String {
 }
 
 fn point(index: usize, radius: f64) -> (f64, f64) {
-    let angle = index as f64 * std::f64::consts::TAU / 8. - std::f64::consts::FRAC_PI_2;
+    let angle =
+        index as f64 * std::f64::consts::TAU / Axis::COUNT as f64 - std::f64::consts::FRAC_PI_2;
     (340. + radius * angle.cos(), 240. + radius * angle.sin())
 }
 
 /// Standalone SVG: partial profiles have gaps, never a fabricated zero point.
 pub fn svg(report: &ScanReport) -> String {
     let mut out = String::from(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 520" role="img" aria-labelledby="title description"><title id="title">MR.DE risk radar</title><desc id="description">Eight risk axes from zero to ten. Missing axes have no point. Team median is unavailable in standalone scans.</desc><rect width="680" height="520" rx="12" fill="#292c32"/><g font-family="system-ui,sans-serif" font-size="13" fill="#eef0f4">"##,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 520" role="img" aria-labelledby="title description"><title id="title">MR.DE risk radar</title><desc id="description">Nine risk axes from zero to ten. Missing axes have no point. Team median is unavailable in standalone scans.</desc><rect width="680" height="520" rx="12" fill="#292c32"/><g font-family="system-ui,sans-serif" font-size="13" fill="#eef0f4">"##,
     );
     for level in 1..=5 {
-        let points = (0..8)
+        let points = (0..Axis::COUNT)
             .map(|i| {
                 let (x, y) = point(i, level as f64 * 30.);
                 format!("{x:.1},{y:.1}")
@@ -143,7 +144,7 @@ pub fn svg(report: &ScanReport) -> String {
         .map_or_else(|| "n/a".into(), |n| format!("{n:.1}/10"));
     let _ = write!(
         out,
-        r#"<text x="340" y="480" text-anchor="middle">{verdict} review · mean {mean} · {}/8 measured axes</text><text x="340" y="503" text-anchor="middle">Team median unavailable</text></g></svg>"#,
+        r#"<text x="340" y="480" text-anchor="middle">{verdict} review · mean {mean} · {}/9 measured axes</text><text x="340" y="503" text-anchor="middle">Team median unavailable</text></g></svg>"#,
         report.summary.measured_axes
     );
     out

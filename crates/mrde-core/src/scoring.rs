@@ -105,6 +105,7 @@ mod tests {
     #[test]
     fn ticket_labels_set_priority_when_the_mr_has_none() {
         let issue = |labels: &[&str]| crate::models::Issue {
+            created_at: None,
             title: "Ticket".into(),
             description: String::new(),
             web_url: "https://example.invalid/issues/1".into(),
@@ -159,6 +160,8 @@ mod tests {
             base_sha: String::new(),
             created_at: format!("2026-01-{day:02}T00:00:00Z").parse().unwrap(),
             labels: labels.iter().map(|l| (*l).into()).collect(),
+            merged_at: None,
+            ticket_created_at: None,
             ticket_labels: vec![],
             pipeline: None,
             approvals: None,
@@ -203,7 +206,7 @@ mod tests {
         let mut queue = base.clone();
         for (mr, value) in queue.iter_mut().zip([2., 9., 7.]) {
             mr.risk = Some(crate::risk::RiskSummary {
-                scores: [Some(value); 8],
+                scores: [Some(value); crate::risk::Axis::COUNT],
                 mean: Some(value),
                 head_sha: mr.sha.clone(),
                 computed_at: now,

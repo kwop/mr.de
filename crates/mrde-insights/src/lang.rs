@@ -61,6 +61,8 @@ pub fn is_generated(path: &str) -> bool {
     matches!(
         name,
         "go.sum"
+            | "bun.lock"
+            | "bun.lockb"
             | "Cargo.lock"
             | "package-lock.json"
             | "pnpm-lock.yaml"

@@ -1,6 +1,6 @@
 ---
 name: radar
-description: Measure the current repository's risk profile with MR.DE's local Rust engine and explain the eight axes with file evidence. Use when the user invokes the radar to assess local edits or compare commits.
+description: Measure the current repository's risk profile with MR.DE's local Rust engine and explain the nine axes with file evidence. Use when the user invokes the radar to assess local edits or compare commits.
 argument-hint: "[base-ref] [--head commit-ref] [--run-checks]"
 disable-model-invocation: true
 ---
@@ -42,7 +42,7 @@ A changed command requires a fresh fingerprint. Never approve proposed commands 
 ## Explain the result
 
 Require `schema_version: 1`; report an incompatible binary otherwise. Use `summary` for
-verdict, mean and measured-axis count. Present the eight `report.profile.axes` in a compact
+verdict, mean and measured-axis count. Present the nine `report.profile.axes` in a compact
 table: label, raw measurement, score out of 10, and limitation. Missing scores are n/a,
 not zero; a partial profile is not an all-clear. Label heuristics as estimates, particularly
 the test-gap axis. Standalone scans have no team median; do not invent one.

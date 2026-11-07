@@ -21,6 +21,11 @@ coupling = [[0,0],[2,2],[5,5],[10,8],[20,10]]
 lint = [[0,0],[2,2],[5,5],[15,8],[30,10]]
 debt = [[0,0],[2,2],[5,5],[15,8],[30,10]]
 
+# Days since creation of the oldest primary ticket, not since MR creation.
+# Age invites revalidation of the requirement; it does not prove obsolescence.
+# Missing ticket dates stay n/a. Merged history uses age at merge time.
+ticket_age = [[0,0],[30,0],[90,4],[180,8],[365,10]]
+
 [verdict]
 deep_axis = 8 # Any measured axis at/above this score requests a deep review.
 deep_mean = 6

@@ -186,3 +186,54 @@ fn risk_tools_are_prepared_only_when_the_setup_control_is_clicked(cx: &mut TestA
             .all(|a| !a.starts_with("ask"))
     );
 }
+
+#[gpui::test]
+fn disktree_scrolls_to_the_open_file_and_does_not_close_it_on_repeat(cx: &mut TestAppContext) {
+    let (executor, view, root, mut visual) = changes(cx);
+    let cx = &mut visual;
+    draw(&root, cx);
+    reveal("disktree-tile-0", &view, &root, cx);
+    finish(&view, &root, cx);
+    draw(&root, cx);
+    let viewport = cx.debug_bounds("mr-detail").unwrap();
+    let panel = cx.debug_bounds("risk-file-history").unwrap();
+    assert!(
+        panel.top() >= viewport.top() - px(1.) && panel.top() < viewport.bottom(),
+        "{panel:?} outside {viewport:?}"
+    );
+    let selected = cx.update(|_, cx| view.read(cx).risk_selected_file.clone());
+    assert!(selected.is_some());
+    reveal("disktree-tile-0", &view, &root, cx);
+    draw(&root, cx);
+    draw(&root, cx);
+    assert_eq!(
+        cx.update(|_, cx| view.read(cx).risk_selected_file.clone()),
+        selected
+    );
+    assert_eq!(actions(&executor, "risk-file"), 1);
+    let panel = cx.debug_bounds("risk-file-history").unwrap();
+    assert!(
+        panel.top() >= viewport.top() - px(1.) && panel.top() < viewport.bottom(),
+        "panel {panel:?}; viewport {viewport:?}; offset {:?}",
+        cx.update(|_, cx| view.read(cx).detail_scroll.offset())
+    );
+}
+
+#[gpui::test]
+fn statistics_disktree_opens_changes_and_reveals_file_history(cx: &mut TestAppContext) {
+    let (_, view, root, mut visual) = changes(cx);
+    let cx = &mut visual;
+    cx.update(|_, cx| view.update(cx, |state, _| state.detail_tab = DetailTab::Statistics));
+    draw(&root, cx);
+    reveal("disktree-tile-0", &view, &root, cx);
+    finish(&view, &root, cx);
+    draw(&root, cx);
+    assert!(cx.update(|_, cx| view.read(cx).detail_tab) == DetailTab::Changes);
+    let viewport = cx.debug_bounds("mr-detail").unwrap();
+    let panel = cx.debug_bounds("risk-file-history").unwrap();
+    assert!(
+        panel.top() >= viewport.top() - px(1.) && panel.top() < viewport.bottom(),
+        "panel {panel:?}; viewport {viewport:?}; offset {:?}",
+        cx.update(|_, cx| view.read(cx).detail_scroll.offset())
+    );
+}

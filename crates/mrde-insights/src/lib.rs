@@ -532,6 +532,8 @@ mod tests {
                 base_sha: base,
                 created_at: chrono::Utc::now(),
                 labels: vec![],
+                merged_at: None,
+                ticket_created_at: None,
                 ticket_labels: vec![],
                 pipeline: None,
                 approvals: None,

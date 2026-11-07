@@ -68,7 +68,7 @@ pub(super) fn explanation(score: &AxisScore, median: Option<f64>) -> String {
 }
 
 fn angle(index: usize) -> f32 {
-    index as f32 * std::f32::consts::TAU / 8. - std::f32::consts::FRAC_PI_2
+    index as f32 * std::f32::consts::TAU / Axis::COUNT as f32 - std::f32::consts::FRAC_PI_2
 }
 fn vertex(center: Point<Pixels>, radius: Pixels, index: usize, score: f64) -> Point<Pixels> {
     let angle = angle(index);
@@ -117,11 +117,13 @@ fn fill(points: &[Point<Pixels>], color: Hsla, window: &mut Window) {
     }
 }
 fn ring(center: Point<Pixels>, radius: Pixels, score: f64) -> Vec<Point<Pixels>> {
-    (0..8).map(|i| vertex(center, radius, i, score)).collect()
+    (0..Axis::COUNT)
+        .map(|i| vertex(center, radius, i, score))
+        .collect()
 }
 /// Solid edges join neighbouring known values; fainter dashed edges cross unknown axes.
 fn outline(
-    values: [Option<f64>; 8],
+    values: [Option<f64>; mrde_core::risk::Axis::COUNT],
     center: Point<Pixels>,
     radius: Pixels,
     color: Hsla,
@@ -129,7 +131,9 @@ fn outline(
     dashed: bool,
     window: &mut Window,
 ) {
-    let known: Vec<(usize, f64)> = (0..8).filter_map(|i| Some((i, values[i]?))).collect();
+    let known: Vec<(usize, f64)> = (0..Axis::COUNT)
+        .filter_map(|i| Some((i, values[i]?)))
+        .collect();
     let edges = match known.len() {
         0 | 1 => 0,
         2 => 1,
@@ -138,7 +142,7 @@ fn outline(
     for k in 0..edges {
         let (i, a) = known[k];
         let (j, b) = known[(k + 1) % known.len()];
-        let neighbours = (i + 1) % 8 == j;
+        let neighbours = (i + 1) % Axis::COUNT == j;
         let mut color = color;
         if !neighbours {
             color.a *= 0.5;
@@ -154,8 +158,8 @@ fn outline(
     }
 }
 fn drawing(
-    scores: [Option<f64>; 8],
-    medians: Option<[Option<f64>; 8]>,
+    scores: [Option<f64>; mrde_core::risk::Axis::COUNT],
+    medians: Option<[Option<f64>; mrde_core::risk::Axis::COUNT]>,
     deep: Option<f64>,
     mini: bool,
 ) -> impl IntoElement {
@@ -201,7 +205,7 @@ fn drawing(
                     stroke(&spoke, color, px(1.), dashed, false, window);
                 }
             }
-            let known: Vec<_> = (0..8)
+            let known: Vec<_> = (0..Axis::COUNT)
                 .filter_map(|i| Some(vertex(center, radius, i, scores[i]?)))
                 .collect();
             if known.len() >= 3 {
@@ -225,13 +229,13 @@ fn drawing(
     )
     .size_full()
 }
-pub(super) fn miniature(scores: [Option<f64>; 8]) -> AnyElement {
+pub(super) fn miniature(scores: [Option<f64>; mrde_core::risk::Axis::COUNT]) -> AnyElement {
     let known: Vec<_> = scores.iter().flatten().copied().collect();
     let tooltip = if known.is_empty() {
         "Risk not calculated".to_string()
     } else {
         format!(
-            "Risk {:.1}/10 · {}/8 axes · cached",
+            "Risk {:.1}/10 · {}/9 axes · cached",
             known.iter().sum::<f64>() / known.len() as f64,
             known.len()
         )
@@ -366,8 +370,14 @@ mod tests {
     fn vertices_have_consistent_orientation_and_clamp_scores() {
         let center = point(px(10.), px(10.));
         assert_eq!(vertex(center, px(5.), 0, 0.), center);
-        assert_eq!(vertex(center, px(5.), 2, 10.), point(px(15.), px(10.)));
-        assert_eq!(vertex(center, px(5.), 2, 20.), point(px(15.), px(10.)));
+        let top = vertex(center, px(5.), 0, 10.);
+        assert!((top.x - px(10.)).abs() < px(0.001));
+        assert_eq!(top.y, px(5.));
+        assert_eq!(
+            vertex(center, px(5.), 2, 20.),
+            vertex(center, px(5.), 2, 10.)
+        );
+        assert_eq!(ring(center, px(5.), 10.).len(), Axis::COUNT);
     }
     #[::core::prelude::v1::test]
     fn measurements_read_as_units_and_severity_follows_the_verdict_thresholds() {

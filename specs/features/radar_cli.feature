@@ -55,7 +55,7 @@ Feature: Measure risk outside the desktop application
   Scenario: Export a partial radar
     Given one or more axes are unavailable
     When I request SVG output
-    Then the document is valid SVG with the eight axis labels
+    Then the document is valid SVG with the nine axis labels
     And unavailable axes have no plotted zero-risk point
     And the measured-axis count and missing team median are explicit
 

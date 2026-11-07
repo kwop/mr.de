@@ -1,6 +1,6 @@
 @contract @risk
 Feature: Inspect an explainable risk profile
-  Eight axes run from 0 to 10 with higher values meaning more risk.
+  Nine axes run from 0 to 10 with higher values meaning more risk.
   Missing evidence stays unavailable and never becomes a zero-risk measurement.
 
   @MRDE-RISK-001 @smoke
@@ -13,10 +13,10 @@ Feature: Inspect an explainable risk profile
 
   @MRDE-RISK-002
   Scenario Outline: Isolate an unavailable scorer
-    Given one scorer "<failure>" while the other seven succeed
+    Given one scorer "<failure>" while the other eight succeed
     When I calculate risk
     Then that axis displays n/a with a reason
-    And the seven successful axes are still shown
+    And the eight successful axes are still shown
     And the mean excludes the unavailable axis and the verdict is marked partial
 
     Examples:
@@ -162,3 +162,35 @@ Feature: Inspect an explainable risk profile
     And the other risk axes can still finish
     When I run "Detect and install tools"
     Then MR.DE publishes a complete replacement dependency cache
+
+  @MRDE-RISK-018 @regression
+  Scenario: Revalidate requirements for an old primary ticket
+    Given the primary ticket was created 180 days ago and the merge request was created today
+    When I calculate risk with the default thresholds
+    Then Ticket age scores 8 and the verdict recommends a Deep review
+    And the explanation asks me to revalidate requirements without declaring the ticket obsolete
+    And missing ticket dates stay unavailable
+
+  @MRDE-RISK-019 @regression
+  Scenario: Reuse persisted historical profiles for the team median
+    Given the team median and its historical profiles have been saved
+    And the requested target tip differs from the Git merge base
+    When I reopen the request and update its team median
+    Then unchanged historical profiles are reused without running their checks again
+    And only newly merged or changed commit profiles are measured
+    And ticket age in historical samples stays fixed at merge time
+
+  @MRDE-RISK-020 @regression
+  Scenario: Isolate oversized files during coupling analysis
+    Given a request changes a large asset, a large source file and a readable dependency manifest
+    When I calculate risk
+    Then the asset does not participate in coupling analysis
+    And the readable manifest contributes to coupling
+    And the omitted source is named in a partial lower-bound explanation
+
+  @MRDE-RISK-021 @regression @visual
+  Scenario: Navigate from the disktree to a file
+    Given a changed file is below the reader viewport or beyond the displayed file rows
+    When I click its disktree tile
+    Then its history panel opens and scrolls into the reader viewport
+    And clicking the same tile again keeps the panel open without reloading its history

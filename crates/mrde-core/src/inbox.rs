@@ -178,6 +178,8 @@ mod tests {
             base_sha: String::new(),
             created_at: chrono::Utc::now(),
             labels: labels.iter().map(|&name| name.into()).collect(),
+            merged_at: None,
+            ticket_created_at: None,
             ticket_labels: ticket.iter().map(|&name| name.into()).collect(),
             pipeline: None,
             approvals: None,

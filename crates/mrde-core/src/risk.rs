@@ -1,5 +1,5 @@
 //! Explainable risk measurements. Unknown is never equivalent to zero risk.
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -14,9 +14,11 @@ pub enum Axis {
     Coupling,
     Lint,
     Debt,
+    TicketAge,
 }
 impl Axis {
-    pub const ALL: [Self; 8] = [
+    pub const COUNT: usize = 9;
+    pub const ALL: [Self; Self::COUNT] = [
         Self::DiffSize,
         Self::Files,
         Self::Complexity,
@@ -25,6 +27,7 @@ impl Axis {
         Self::Coupling,
         Self::Lint,
         Self::Debt,
+        Self::TicketAge,
     ];
     pub fn index(self) -> usize {
         Self::ALL
@@ -42,6 +45,7 @@ impl Axis {
             Self::Coupling => "coupling",
             Self::Lint => "lint",
             Self::Debt => "debt",
+            Self::TicketAge => "ticket_age",
         }
     }
     pub fn label(self) -> &'static str {
@@ -54,9 +58,87 @@ impl Axis {
             Self::Coupling => "Coupling",
             Self::Lint => "New warnings",
             Self::Debt => "Added debt",
+            Self::TicketAge => "Ticket age",
         }
     }
 }
+// Old queue/profile payloads contain eight axes. Extend them with an unknown age;
+// never turn an old cache entry into zero risk or fail to open the saved queue.
+fn read_values<'de, D, T>(deserializer: D) -> std::result::Result<[T; Axis::COUNT], D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    let mut values = Vec::<T>::deserialize(deserializer)?;
+    if values.len() == Axis::COUNT - 1 {
+        values.push(T::default());
+    }
+    values
+        .try_into()
+        .map_err(|_| serde::de::Error::custom("Invalid risk axis count"))
+}
+fn read_axes<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<[AxisScore; Axis::COUNT], D::Error> {
+    let mut values = Vec::<AxisScore>::deserialize(deserializer)?;
+    if values.len() == Axis::COUNT - 1 {
+        values.push(AxisScore::unavailable(
+            Axis::TicketAge,
+            "Ticket creation date not recorded in this cached profile",
+        ));
+    }
+    if values
+        .iter()
+        .zip(Axis::ALL)
+        .any(|(score, axis)| score.axis != axis)
+    {
+        return Err(serde::de::Error::custom("Invalid risk axis order"));
+    }
+    values
+        .try_into()
+        .map_err(|_| serde::de::Error::custom("Invalid risk axis count"))
+}
+
+/// Age is a prompt to revalidate requirements, not evidence that a ticket is obsolete.
+pub fn ticket_age(created_at: Option<DateTime<Utc>>, at: DateTime<Utc>) -> Result<RawMetric> {
+    let created = created_at.context("No creation date available for a primary linked ticket")?;
+    ensure!(
+        created <= at,
+        "Ticket creation date is later than the review reference date"
+    );
+    Ok(RawMetric {
+        value: (at - created).num_days() as f64,
+        unit: "days".into(),
+        method: format!(
+            "Oldest primary ticket created {}; age as of {}. Revalidate the requirements: age alone does not establish that a ticket is obsolete.",
+            created.format("%Y-%m-%d"),
+            at.format("%Y-%m-%d")
+        ),
+        estimated: true,
+        evidence: vec![],
+    })
+}
+
+/// Refresh only the calendar-dependent measurement; commit-based checks stay cached.
+pub fn refresh_ticket_age(
+    profile: &mut RiskProfile,
+    created: Option<DateTime<Utc>>,
+    at: DateTime<Utc>,
+    curve: &[[f64; 2]],
+) {
+    let axis = Axis::TicketAge;
+    profile.axes[axis.index()] =
+        match ticket_age(created, at).and_then(|raw| Ok((normalize(raw.value, curve)?, raw))) {
+            Ok((score, raw)) => AxisScore {
+                axis,
+                score: Some(score),
+                raw: Some(raw),
+                unavailable: None,
+            },
+            Err(error) => AxisScore::unavailable(axis, error.to_string()),
+        };
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence {
     pub path: String,
@@ -91,7 +173,8 @@ impl AxisScore {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskProfile {
-    pub axes: [AxisScore; 8],
+    #[serde(deserialize_with = "read_axes")]
+    pub axes: [AxisScore; Axis::COUNT],
     pub computed_at: DateTime<Utc>,
     pub head_sha: String,
     pub base_sha: String,
@@ -219,8 +302,10 @@ pub fn median(values: impl IntoIterator<Item = f64>) -> Option<f64> {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Baseline {
-    pub medians: [Option<f64>; 8],
-    pub samples: [usize; 8],
+    #[serde(deserialize_with = "read_values")]
+    pub medians: [Option<f64>; Axis::COUNT],
+    #[serde(deserialize_with = "read_values")]
+    pub samples: [usize; Axis::COUNT],
     pub requested: usize,
     pub merged_mrs: usize,
     pub computed_at: DateTime<Utc>,
@@ -289,7 +374,8 @@ pub struct PendingCommand {
 /// Compact cached queue presentation; raw evidence is loaded only for the selected MR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskSummary {
-    pub scores: [Option<f64>; 8],
+    #[serde(deserialize_with = "read_values")]
+    pub scores: [Option<f64>; Axis::COUNT],
     pub mean: Option<f64>,
     pub head_sha: String,
     pub computed_at: DateTime<Utc>,
@@ -322,6 +408,61 @@ mod tests {
             config_key: "v1".into(),
         }
     }
+    #[test]
+    fn ticket_age_uses_days_and_revalidates_a_cached_commit_as_time_passes() {
+        let created: DateTime<Utc> = "2026-01-01T00:00:00Z".parse().unwrap();
+        let curve = [[0., 0.], [30., 0.], [90., 4.], [180., 8.], [365., 10.]];
+        let mut report = profile(&[Some(1.); Axis::COUNT]);
+        let measured = report.computed_at;
+        for (days, score, verdict) in [
+            (30, 0., Verdict::Quick),
+            (90, 4., Verdict::Quick),
+            (180, 8., Verdict::Deep),
+            (365, 10., Verdict::Deep),
+        ] {
+            refresh_ticket_age(
+                &mut report,
+                Some(created),
+                created + chrono::Duration::days(days),
+                &curve,
+            );
+            let age = &report.axes[Axis::TicketAge.index()];
+            assert_eq!(age.score, Some(score));
+            assert_eq!(age.raw.as_ref().unwrap().value, days as f64);
+            assert_eq!(report.verdict(&VerdictThresholds::default()), Some(verdict));
+            assert_eq!(
+                report.computed_at, measured,
+                "technical measurements stay cached"
+            );
+        }
+        refresh_ticket_age(&mut report, None, created, &curve);
+        assert!(report.axes[Axis::TicketAge.index()].score.is_none());
+        assert!(ticket_age(Some(created), created - chrono::Duration::days(1)).is_err());
+    }
+
+    #[test]
+    fn old_eight_axis_caches_restore_with_an_unknown_ticket_age() {
+        let original = profile(&[Some(2.); Axis::COUNT]);
+        let mut json = serde_json::to_value(&original).unwrap();
+        json["axes"].as_array_mut().unwrap().pop();
+        let restored: RiskProfile = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.available(), 8);
+        assert!(restored.axes[Axis::TicketAge.index()].score.is_none());
+        let summary: RiskSummary = serde_json::from_value(serde_json::json!({
+            "scores": [1,2,3,4,5,6,7,8], "mean": 4.5, "head_sha": "head",
+            "computed_at": "2026-01-01T00:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(summary.scores[Axis::TicketAge.index()], None);
+        let mut baseline =
+            serde_json::to_value(Baseline::from_profiles(&[original], 30, 1)).unwrap();
+        baseline["samples"].as_array_mut().unwrap().pop();
+        baseline["medians"].as_array_mut().unwrap().pop();
+        let restored: Baseline = serde_json::from_value(baseline).unwrap();
+        assert_eq!(restored.samples[Axis::TicketAge.index()], 0);
+        assert_eq!(restored.medians[Axis::TicketAge.index()], None);
+    }
+
     #[test]
     fn baseline_counts_only_available_measurements_per_axis() {
         let baseline = Baseline::from_profiles(

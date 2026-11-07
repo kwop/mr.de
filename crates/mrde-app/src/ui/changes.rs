@@ -49,7 +49,7 @@ fn chip(axis: Axis, findings: usize) -> String {
         Axis::Coupling => format!("coupling {findings}"),
         Axis::Lint => format!("lint {findings}"),
         Axis::Debt => format!("debt {findings}"),
-        Axis::DiffSize | Axis::Files => axis.label().into(),
+        Axis::DiffSize | Axis::Files | Axis::TicketAge => axis.label().into(),
     }
 }
 
@@ -267,6 +267,22 @@ impl Cockpit {
     pub(super) fn select_risk_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.open_risk_file(path, false, cx);
     }
+    /// Disktree selection is navigation, not the inline row's open/close toggle.
+    pub(super) fn jump_to_risk_file(
+        &mut self,
+        path: String,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.risk_selected_file.as_deref() != Some(&path) || self.risk_file_in_evidence {
+            self.open_risk_file(path.clone(), false, cx);
+        }
+        if self.risk_selected_file.as_deref() == Some(&path) && !self.risk_file_in_evidence {
+            self.detail_tab = super::inbox::DetailTab::Changes;
+            self.risk_scroll_pending.set(true);
+            cx.notify();
+        }
+    }
     /// Opens or closes a file's owners and history, under its row in the file list or, with
     /// `in_evidence`, under its findings in the axis evidence. Loads it once per commit.
     pub(super) fn open_risk_file(
@@ -321,7 +337,7 @@ impl Cockpit {
         self.stats = Some((id.clone(), report.stats.clone()));
         self.presentation_revision += 1;
         self.status = format!(
-            "Risk profile ready · {}/8 axes · unavailable axes are excluded from the mean.",
+            "Risk profile ready · {}/9 axes · unavailable axes are excluded from the mean.",
             report.profile.available()
         );
         for message in &report.setup_messages {
@@ -367,7 +383,7 @@ impl Cockpit {
                     card()
                         .debug_selector(|| "risk-prompt".into())
                         .child(muted(
-                            "Calculate an explainable risk profile of this commit: size, files, complexity, tests, sensitive paths, coupling, warnings, and debt.",
+                            "Calculate an explainable risk profile of this commit: size, files, complexity, tests, sensitive paths, coupling, warnings, debt, and ticket age.",
                         ))
                         .child(muted(
                             "It runs locally in the MR worktree (created if missing). Missing tools leave an axis n/a, never zero. Claude never starts automatically.",
@@ -507,7 +523,7 @@ impl Cockpit {
         let thresholds = &report.verdict_thresholds;
         let verdict = profile.verdict(thresholds);
         let color = verdict.map_or(SUBTLE, verdict_color);
-        let partial = profile.available() < 8;
+        let partial = profile.available() < Axis::COUNT;
         let missing: Vec<&str> = profile
             .axes
             .iter()
@@ -619,6 +635,8 @@ impl Cockpit {
             );
         match baseline {
             Some(b) => {
+                info = info.child(muted(format!("Median saved {} · updates reuse unchanged commit profiles",
+                    b.computed_at.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M"))));
                 // Axes never measured (no lint command, say) are already n/a.
                 let fewest = b.samples.iter().copied().filter(|n| *n > 0).min();
                 if let Some(fewest) = fewest.filter(|n| *n < b.merged_mrs) {
@@ -641,7 +659,7 @@ impl Cockpit {
             }
             None => {
                 info = info.child(muted(
-                    "Update team median measures the latest merged MRs locally, from commits already fetched.",
+                    "Update team median measures uncached merged MRs locally and saves the results. Later updates reuse unchanged commit profiles.",
                 ))
             }
         }
@@ -881,6 +899,19 @@ impl Cockpit {
                 .into_any_element();
         };
         section = section.child(muted(raw.method.clone()));
+        if axis == Axis::TicketAge {
+            for issue in primary_tickets(&detail.mr, &detail.issues) {
+                let url = issue.web_url.clone();
+                section = section.child(
+                    Button::new(SharedString::from(format!("risk-ticket-{url}")))
+                        .small()
+                        .ghost()
+                        .label(issue.title.clone())
+                        .on_click(move |_, _, cx| cx.open_url(&url)),
+                );
+            }
+            return section.into_any_element();
+        }
         // Files with the largest contribution first; their lines in file order.
         let mut groups: BTreeMap<&str, Vec<&Evidence>> = BTreeMap::new();
         for item in &raw.evidence {
@@ -1093,7 +1124,29 @@ impl Cockpit {
         report: Option<&RiskReport>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let pending = self.risk_scroll_pending.clone();
+        let scroll = self.detail_scroll.clone();
         let mut panel = div()
+            .on_children_prepainted(move |bounds, window, cx| {
+                if pending.get()
+                    && let Some(first) = bounds.first()
+                {
+                    pending.set(false);
+                    // Align the first content row just below the reader's top after
+                    // layout. ScrollAnchor uses native frame callbacks, which the
+                    // GPUI test platform does not deliver; defer works in both modes.
+                    let offset = point(
+                        px(0.),
+                        scroll.offset().y + scroll.bounds().top() - first.top() + px(16.),
+                    );
+                    let scroll = scroll.clone();
+                    window.defer(cx, move |window, _| {
+                        scroll.set_offset(offset);
+                        window.refresh();
+                    });
+                }
+            })
+            .id(SharedString::from(format!("risk-history-{path}")))
             .debug_selector(|| "risk-file-history".into())
             .my_2()
             .ml(px(22.))
@@ -1274,7 +1327,7 @@ impl Cockpit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn profile(scores: [Option<f64>; 8]) -> RiskProfile {
+    fn profile(scores: [Option<f64>; mrde_core::risk::Axis::COUNT]) -> RiskProfile {
         RiskProfile {
             axes: std::array::from_fn(|i| AxisScore {
                 axis: Axis::ALL[i],
@@ -1291,18 +1344,24 @@ mod tests {
     #[::core::prelude::v1::test]
     fn verdict_reasons_name_the_axes_or_the_mean_that_decide() {
         let thresholds = VerdictThresholds::default();
-        let mut scores = [Some(1.); 8];
+        let mut scores = [Some(1.); mrde_core::risk::Axis::COUNT];
         scores[Axis::SensitivePaths.index()] = Some(8.6);
         assert_eq!(
             reason(&profile(scores), &thresholds),
             "Sensitive paths 8.6 at or above the deep-review threshold (8)"
         );
         assert_eq!(
-            reason(&profile([Some(4.); 8]), &thresholds),
+            reason(
+                &profile([Some(4.); mrde_core::risk::Axis::COUNT]),
+                &thresholds
+            ),
             "Mean at or above 3.5; no axis reaches 8"
         );
         assert_eq!(
-            reason(&profile([Some(1.); 8]), &thresholds),
+            reason(
+                &profile([Some(1.); mrde_core::risk::Axis::COUNT]),
+                &thresholds
+            ),
             "Mean below 3.5; no axis reaches 8"
         );
     }
