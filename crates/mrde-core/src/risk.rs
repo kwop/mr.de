@@ -259,6 +259,9 @@ pub struct FileCommit {
     pub author: String,
     pub date: String,
     pub subject: String,
+    /// Between the merge base and the MR head: part of the change under review.
+    #[serde(default)]
+    pub in_mr: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskReport {

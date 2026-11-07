@@ -38,12 +38,15 @@ pub fn pathspecs(lang: Lang) -> &'static [&'static str] {
 
 pub fn is_test(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
-    name.ends_with("_test.go")
+    // `tests.rs` (a Rust test module), `user_test.go`, `UserTests.swift`, `user_spec.rb`.
+    let stem = name.split('.').next().unwrap_or(name);
+    matches!(stem, "test" | "tests")
+        || ["_test", "_tests", "_spec", "Test", "Tests"]
+            .iter()
+            .any(|suffix| stem.len() > suffix.len() && stem.ends_with(suffix))
         || name.contains(".test.")
         || name.contains(".spec.")
         || name.starts_with("test_")
-        || name.ends_with("_test.py")
-        || name.ends_with("_tests.rs")
         || path.split('/').any(|part| {
             matches!(
                 part,
@@ -86,6 +89,18 @@ mod tests {
         assert!(is_test("src/usecases/create_series_test.go"));
         assert!(is_test("ui/SeriesDialog.test.tsx"));
         assert!(!is_test("src/testing_utils.go"));
+        assert!(is_test("crates/forge/src/github/tests.rs"));
+        assert!(is_test("src/settings/projects_tests.rs"));
+        assert!(is_test("app/src/InvoiceServiceTest.kt"));
+        assert!(is_test("spec/models/invoice_spec.rb"));
+        for source in [
+            "src/latest.rs",
+            "src/contest.go",
+            "src/attest.rs",
+            "src/Tests.swift",
+        ] {
+            assert!(!is_test(source), "{source}");
+        }
         assert!(is_generated("backend/src/go.sum"));
         assert!(is_generated("domain/mocks/repo_mock.go"));
     }

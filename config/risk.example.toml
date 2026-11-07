@@ -4,8 +4,9 @@
 baseline_count = 30 # Last merged MRs of this GitLab repository, not the whole group.
 timeout_seconds = 60 # Per scorer/command; a failure produces n/a for that axis.
 coverage_path = "coverage/lcov.info" # Optional, relative to the worktree; Cobertura XML also supported.
-# No report: explicitly labelled test-file heuristic. No modified source lines: n/a.
-# Content-based scorers skip these files; diff size and file totals still count the whole MR.
+# No report: explicitly labelled heuristic counting added source lines whose file has no
+# related test change. No modified source lines: n/a.
+# No axis counts these files, nor lockfiles and generated or vendored code.
 exclude = ["**/vendor/**", "**/node_modules/**", "**/target/**", "**/*.lock"]
 
 # Raw measurement -> risk in 0..10. Scores must never decrease; endpoints clamp.
@@ -13,7 +14,7 @@ exclude = ["**/vendor/**", "**/node_modules/**", "**/target/**", "**/*.lock"]
 diff_size = [[0,0],[50,2],[300,5],[1000,8],[3000,10]]
 files = [[0,0],[3,2],[10,5],[30,8],[80,10]]
 complexity = [[0,0],[5,2],[20,5],[50,8],[100,10]]
-test_gap = [[0,0],[0.2,2],[0.5,5],[0.8,8],[1,10]]
+test_gap = [[0,0],[25,2],[100,5],[300,8],[800,10]] # Untested added lines.
 sensitive_paths = [[0,0],[0.1,2],[0.3,5],[0.6,8],[1,10]]
 coupling = [[0,0],[2,2],[5,5],[10,8],[20,10]]
 lint = [[0,0],[2,2],[5,5],[15,8],[30,10]]
@@ -48,7 +49,7 @@ regex = '\.unwrap\s*\('
 weight = 1.0
 [[debt]]
 id = "any"
-regex = '\bany\b'
+regex = '(?::\s*any\b|\bas\s+any\b|<any>)' # TypeScript's any type.
 weight = 0.5
 # Optional, language-specific approximation for commented-out code:
 # [[debt]]

@@ -83,7 +83,7 @@ impl Default for RiskConfig {
             ),
             (
                 Axis::TestGap,
-                vec![[0., 0.], [0.2, 2.], [0.5, 5.], [0.8, 8.], [1., 10.]],
+                vec![[0., 0.], [25., 2.], [100., 5.], [300., 8.], [800., 10.]],
             ),
             (
                 Axis::SensitivePaths,
@@ -130,7 +130,8 @@ impl Default for RiskConfig {
                 },
                 DebtRule {
                     id: "any".into(),
-                    regex: r"\bany\b".into(),
+                    // TypeScript's `any` type, not the English word or `Iterator::any`.
+                    regex: r"(?::\s*any\b|\bas\s+any\b|<any>)".into(),
                     weight: 0.5,
                 },
             ],
@@ -297,7 +298,8 @@ impl RiskConfig {
     }
     pub fn fingerprint(&self) -> String {
         format!(
-            "risk-v1:{:x}",
+            // Bumped when scorers change meaning, so cached profiles are measured again.
+            "risk-v2:{:x}",
             Sha256::digest(serde_json::to_vec(self).expect("serializable config"))
         )
     }
