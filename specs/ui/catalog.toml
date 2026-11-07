@@ -1,0 +1,199 @@
+# Native MR.DE stories. This catalog describes review candidates, not approved baselines.
+version = 1
+
+[[story]]
+id = "inbox.default"
+title = "Review inbox"
+scenario = "queue"
+contracts = ["MRDE-INBOX-001", "MRDE-UI-001"]
+inspect = ["Sidebar navigation, queue controls and selected-row contrast.", "Labels, pipeline, age and change counts remain readable."]
+
+[[story]]
+id = "inbox.filtered"
+title = "Search and label filters"
+scenario = "queue"
+contracts = ["MRDE-INBOX-004"]
+inspect = ["Search and selected labels are visible; counts describe the filtered queue."]
+env = { MRDE_SCENARIO_SEARCH = "invoice", MRDE_SCENARIO_LABEL = "P::1" }
+
+[[story]]
+id = "projects.selector"
+title = "Independent project selector"
+scenario = "projects"
+contracts = ["MRDE-PROJ-001"]
+inspect = ["Active project, alternate provider and New project are discoverable."]
+
+[[story]]
+id = "settings.gitlab"
+title = "GitLab connection settings"
+scenario = "settings"
+contracts = ["MRDE-CONN-001", "MRDE-CONN-004"]
+inspect = ["Test connection and Save are separate.", "Token fields are masked and Cloudflare settings are optional."]
+
+[[story]]
+id = "settings.github"
+title = "GitHub connection settings"
+scenario = "settings:github"
+contracts = ["MRDE-PROJ-001", "MRDE-CONN-001"]
+inspect = ["GitHub owner or repository scope is explicit.", "GitLab-only Cloudflare fields are absent."]
+
+[[story]]
+id = "reader.inbox"
+title = "Queue above the reader"
+scenario = "detail:description"
+contracts = ["MRDE-READ-001", "MRDE-UI-001"]
+inspect = ["Selected request is clear and actions remain attached to the reader."]
+
+[[story]]
+id = "reader.markdown"
+title = "Long title and Markdown"
+scenario = "focus:description"
+contracts = ["MRDE-READ-003", "MRDE-UI-002"]
+inspect = ["Title, metadata, labels and body do not overlap.", "Inspect tables, inline code, fenced code and list bullets by scrolling."]
+
+[[story]]
+id = "reader.labels"
+title = "Scoped labels"
+scenario = "focus:description"
+contracts = ["MRDE-INBOX-010"]
+inspect = ["Scope uses the forge color and value uses white; adjoining segments stay aligned."]
+
+[[story]]
+id = "reader.files"
+title = "Changed file list"
+scenario = "focus:files"
+contracts = ["MRDE-READ-004"]
+inspect = ["Paths and counts are readable without opening all diffs."]
+
+[[story]]
+id = "reader.history-bottom"
+title = "Bottom of History"
+scenario = "focus:history"
+contracts = ["MRDE-READ-005"]
+inspect = ["The complete last card is visible above the footer.", "Pinned request actions remain available."]
+env = { MRDE_SCENARIO_SCROLL = "100000" }
+
+[[story]]
+id = "context.overlay"
+title = "Floating review context"
+scenario = "focus:description"
+contracts = ["MRDE-UI-003"]
+inspect = ["The context panel can be closed and does not replace the reading position."]
+env = { MRDE_SCENARIO_CONTEXT = "overlay" }
+
+[[story]]
+id = "context.docked"
+title = "Docked review context"
+scenario = "focus:description"
+contracts = ["MRDE-UI-003"]
+inspect = ["Panel and reader remain separate; use a 1440-point test window to validate the real breakpoint."]
+env = { MRDE_SCENARIO_CONTEXT = "docked", MRDE_WINDOW = "1440x1000" }
+
+[[story]]
+id = "risk.empty"
+title = "Risk calculation not requested"
+scenario = "focus:changes"
+contracts = ["MRDE-RISK-001"]
+inspect = ["The unmeasured state explains the explicit calculation action.", "Do not present absent data as zero risk."]
+env = { MRDE_SCENARIO_FRESH = "1" }
+
+[[story]]
+id = "risk.partial"
+title = "Risk radar with an unavailable axis"
+scenario = "focus:changes"
+contracts = ["MRDE-RISK-002", "MRDE-UI-004"]
+inspect = ["Eight labeled axes, blue profile, dashed median and visible n/a.", "Verdict, known-axis mean and sample counts remain readable."]
+
+[[story]]
+id = "risk.evidence"
+title = "Unavailable-axis explanation"
+scenario = "focus:changes"
+contracts = ["MRDE-RISK-007"]
+inspect = ["The selected axis explains its unavailable value and exposes an explicit Claude action."]
+env = { MRDE_SCENARIO_AXIS = "lint", MRDE_SCENARIO_SCROLL = "450" }
+
+[[story]]
+id = "risk.file-history"
+title = "Ownership and history of a file"
+scenario = "focus:changes"
+contracts = ["MRDE-RISK-008"]
+inspect = ["Selected path, author percentages, recent commits and risk findings belong to the same file."]
+env = { MRDE_SCENARIO_FILE = "first", MRDE_SCENARIO_SCROLL = "800" }
+
+[[story]]
+id = "review.ready"
+title = "Cached Claude pre-review"
+scenario = "focus:review"
+contracts = ["MRDE-AI-002"]
+inspect = ["Summary, risk severities, priority files and confidence have a clear hierarchy."]
+
+[[story]]
+id = "analysis.structure"
+title = "Structure and guided tour"
+scenario = "focus:structure"
+contracts = ["MRDE-ANALYSIS-001", "MRDE-ANALYSIS-004"]
+inspect = ["Tour, changed symbols and impact stay readable with long paths."]
+
+[[story]]
+id = "analysis.risks"
+title = "Contracts, dependencies and patterns"
+scenario = "focus:risks"
+contracts = ["MRDE-ANALYSIS-001"]
+inspect = ["Findings carry a severity label and evidence, not color alone."]
+
+[[story]]
+id = "checks.compliance"
+title = "Specification traceability"
+scenario = "focus:checks"
+contracts = ["MRDE-ANALYSIS-006"]
+inspect = ["Requirements, code, tests and untested gaps can be distinguished."]
+
+[[story]]
+id = "visual.comparison"
+title = "Before and after screenshots"
+scenario = "focus:visual"
+contracts = ["MRDE-ANALYSIS-007"]
+inspect = ["Before, after and difference have unambiguous labels and preserved image proportions."]
+
+[[story]]
+id = "image.fit"
+title = "Fitted portrait image"
+scenario = "image"
+contracts = ["MRDE-IMAGE-001"]
+inspect = ["The top and bottom fit below the toolbar.", "Close and zoom controls do not collide with window controls."]
+
+[[story]]
+id = "image.zoom"
+title = "Magnified portrait image"
+scenario = "image:zoom"
+contracts = ["MRDE-IMAGE-002", "MRDE-IMAGE-003"]
+inspect = ["Zoom controls remain visible; verify wheel, trackpad and scrollbar movement interactively."]
+
+[[story]]
+id = "approval.confirm"
+title = "Approval confirmation"
+scenario = "confirm"
+contracts = ["MRDE-APPROVE-001"]
+inspect = ["Request identity and reviewed commit are visible before confirmation."]
+
+[[story]]
+id = "worktrees.default"
+title = "Worktree cleanup"
+scenario = "worktrees"
+contracts = ["MRDE-TREE-002", "MRDE-TREE-003"]
+inspect = ["Clean and dirty worktrees are distinguishable and cleanup is explicit."]
+
+[[story]]
+id = "threads.timeline"
+title = "Resolver thread timeline"
+scenario = "threads"
+contracts = ["MRDE-RESOLVE-003", "MRDE-RESOLVE-004"]
+inspect = ["Thread state, attempts and intervention actions are understandable."]
+
+[[story]]
+id = "debug.logs"
+title = "Debug log drawer"
+scenario = "logs"
+contracts = ["MRDE-UI-005"]
+inspect = ["Logs have readable timestamps and leave navigation accessible.", "This story opens the drawer; settings error interactions are covered by GPUI tests."]
+

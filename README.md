@@ -126,6 +126,8 @@ See [the risk guide](docs/risk.md) for measurement limits, sample counts and cac
 
 ## Documentation
 
+- [Product specifications](specs/README.md): Gherkin contracts and automation entry points.
+- [UI reference and native story catalog](specs/ui/README.md): design conventions, interactive previews and review captures.
 - [User guide](docs/user-guide.md): configuration, review workflow, labels, analysis tabs,
   compliance, visual comparison, and worktrees.
 - [Architecture](docs/architecture.md): crates, data flow, caching, and how Claude and Git
