@@ -194,7 +194,7 @@ inspect = ["Thread state, attempts and intervention actions are understandable."
 id = "debug.logs"
 title = "Debug log drawer"
 scenario = "logs"
-contracts = ["MRDE-UI-005"]
+contracts = ["MRDE-UI-005", "MRDE-UI-007"]
 inspect = ["Logs have readable timestamps and leave navigation accessible.", "This story opens the drawer; settings error interactions are covered by GPUI tests."]
 
 [[story]]
