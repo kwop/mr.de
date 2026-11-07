@@ -189,11 +189,15 @@ Images resolve relative to the document's project. GitLab uploads such as
 `/uploads/<secret>/image.png` are downloaded through the authenticated uploads API (GitLab
 17.4 or later), including Cloudflare headers; public HTTP images load without credentials.
 Downloads run in the background, four at a time, up to 10 MiB each. Clicking an image opens
-a viewer that fits the entire image inside the window, preserving its proportions. Use the
-magnifying-glass **Zoom** button to enlarge it, **−** to zoom out, and **Fit** to restore
-the initial view. The percentage is relative to the fitted view. Scroll vertically or
-horizontally with the trackpad, mouse wheel, or scrollbars while zoomed. **Escape** returns
-to the same position in the description.
+a centered viewer that fits the entire image inside the window, preserving its proportions.
+Hover over the image for a **+ magnifier** and click the detail to enlarge: 2×, 4×, then 8×.
+At 8× the cursor becomes a **− magnifier**; the next click returns to the fitted view. Zoom
+stays anchored at the point clicked. Hold the left mouse button and drag to pan; the cursor
+becomes a grabbing hand, and releasing a drag never triggers a zoom. Pan stops at the edges.
+
+The toolbar's **Zoom**, **−**, and **Fit** controls remain available. The percentage is
+relative to the fitted view. Trackpad, wheel and scrollbars still move a zoomed image.
+**Escape** closes the viewer and returns to the same position in the description.
 
 **Statistics** shows the *Disktree*, a treemap of changed lines per file grouped into zones
 (directories). It is estimated from GitLab diffs at once; **Compute statistics** replaces the
