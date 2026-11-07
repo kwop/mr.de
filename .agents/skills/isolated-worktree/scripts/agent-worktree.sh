@@ -7,6 +7,9 @@
 #                                      same, from a snapshot of the main checkout including
 #                                      its uncommitted work (the checkout is not modified)
 #   agent-worktree.sh sync <task>      merge the trunk into agent/<task>, inside its worktree
+#   agent-worktree.sh sync <task> --from-checkout
+#                                      merge a new snapshot of the main checkout instead,
+#                                      while it still holds uncommitted work
 #   agent-worktree.sh land <task>      merge agent/<task> into the trunk in the main checkout
 #   agent-worktree.sh status           every agent worktree, ahead/behind, local changes
 #   agent-worktree.sh remove <task>    delete a landed worktree and its branch
@@ -107,7 +110,12 @@ cmd_sync() {
     dir="$ROOT/$1"
     [ -d "$dir" ] || die "no worktree at $dir"
     require_clean "$dir" "commit or discard the changes in $dir before syncing"
-    if ! git -C "$dir" merge --no-autostash --no-edit "$TRUNK"; then
+    source=$TRUNK
+    if [ "${2:-}" = --from-checkout ]; then
+        source=$(snapshot "$(latest_snapshot)" "Snapshot of the main checkout for agent/$1")
+        git -C "$MAIN" update-ref "$SNAPSHOT_REF" "$source"
+    fi
+    if ! git -C "$dir" merge --no-autostash --no-edit "$source"; then
         printf 'agent-worktree: resolve the conflicts in %s, then: git add <files> && git commit --no-edit\n' "$dir" >&2
         exit 1
     fi
@@ -196,9 +204,13 @@ start)
     [ $# -ge 1 ] && [ $# -le 2 ] || die "usage: start <task> [--from-checkout]"
     cmd_start "$@"
     ;;
-sync | land)
-    [ $# -eq 1 ] || die "usage: $command <task>"
-    "cmd_$command" "$1"
+sync)
+    [ $# -ge 1 ] && [ $# -le 2 ] || die "usage: sync <task> [--from-checkout]"
+    cmd_sync "$@"
+    ;;
+land)
+    [ $# -eq 1 ] || die "usage: land <task>"
+    cmd_land "$1"
     ;;
 remove)
     [ $# -ge 1 ] || die "usage: remove <task> [--force]"

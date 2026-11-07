@@ -40,6 +40,9 @@ repository root: `.agents/skills/isolated-worktree/scripts/agent-worktree.sh <co
 - Pull in other agents' landed work with `agent-worktree.sh sync <task>` (merges `main` into
   your branch, inside your worktree). Resolve conflicts there, then
   `git add <files> && git commit --no-edit`.
+- While the main checkout still holds uncommitted work, `sync <task> --from-checkout` merges
+  a fresh snapshot of it instead. A snapshot can catch another agent mid-edit: if your
+  worktree stops compiling after one, wait and take another rather than fixing their code.
 
 ## Land
 
@@ -64,5 +67,7 @@ Update this list when the workflow surprises you, and improve the script with it
 - Codex app worktrees live under `$CODEX_HOME/worktrees` in detached HEAD. Its **Hand off**
   moves uncommitted changes between checkouts: do not hand a chat off to Local while the
   main checkout holds another agent's work.
+- A snapshot taken while another agent was mid-edit did not compile (missing functions
+  in `demo.rs`). Build right after `start --from-checkout` and resnapshot if needed.
 - `target/` is about 30 GB here. `start` clones only `debug/deps`, `debug/build`,
   `debug/.fingerprint`, `tools`, and `zig`, not the 10 GB `debug/incremental`.
