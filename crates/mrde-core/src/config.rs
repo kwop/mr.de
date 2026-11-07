@@ -67,7 +67,7 @@ impl Provider {
         }
     }
     pub fn available(self) -> bool {
-        self == Self::Gitlab
+        matches!(self, Self::Gitlab | Self::Github)
     }
 }
 

@@ -1,6 +1,6 @@
 # mr.de
 
-A native macOS review cockpit for GitLab merge requests, built in Rust with
+A native macOS review cockpit for GitLab merge requests and GitHub pull requests, built in Rust with
 [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui). It gathers your review queue, merge request descriptions,
 linked tickets, changed files, and approval in one window, and helps you understand large
 merge requests before approving them: structure, history, contracts, risks, traceability to
@@ -66,10 +66,11 @@ All screenshots use the built-in demo data (`--ui-preview`).
 - Rust 1.97.1; the toolchain is pinned in `rust-toolchain.toml`.
 - Zig 0.16.0 for the embedded Ghostty build. The bootstrap script needs Python 3.12+ and
   installs a checksum-verified copy under `target/tools/`, without replacing system Zig.
-- Git with SSH access to your GitLab repositories. Your `~/.ssh/config`, including any
-  `ProxyCommand`, is used as is.
-- A GitLab personal access token with the `api` scope. Self-hosted instances behind
-  Cloudflare Access are supported with a service token.
+- Git with SSH access to your GitLab or GitHub repositories. Your `~/.ssh/config`, including
+  any `ProxyCommand`, is used as is.
+- A GitLab personal access token with the `api` scope (self-hosted instances behind
+  Cloudflare Access are supported with a service token), or a GitHub token with the `repo`
+  scope or the equivalent fine-grained permissions (see the user guide).
 - Optional: Claude Code installed and logged in, for pre-reviews, tours, compliance, and Super Resolver.
 
 ## Quick start
@@ -82,11 +83,10 @@ cargo run --locked -p mrde -- --ui-preview   # explore with demo data, no networ
 cargo run --locked -p mrde                   # connect to your GitLab instance
 ```
 
-On first launch, open **Project settings**, name your project, enter its GitLab URL and token,
+On first launch, open **Project settings**, name your project, choose GitLab or GitHub, enter its URL and token,
 then **Test connection** and **Save**. The project selector above the sidebar menus lets you
 switch workspaces or create another with **New project**. Each has its own connection, optional
-GitLab group, preferences, credentials, and cached data. GitHub profiles can be saved; their
-connector is not available yet.
+GitLab group or GitHub owner, preferences, credentials, and cached data.
 
 Secrets stay in macOS Keychain. Other settings live in `~/.config/mrde/projects.toml`
 (see [`config/projects.example.toml`](config/projects.example.toml)). Existing `config.toml`

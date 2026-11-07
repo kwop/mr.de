@@ -5,7 +5,7 @@ use mrde_core::{
     insights::{Insights, Tour, VisualReport},
     models::*,
 };
-use mrde_forge::{Forge, gitlab::GitLab};
+use mrde_forge::{Forge, github::GitHub, gitlab::GitLab};
 use mrde_git::{WorktreeEntry, Worktrees};
 use mrde_store::{Store, read_secret};
 use std::{
@@ -183,10 +183,10 @@ impl SystemExecutor {
         {
             return Ok(forge.clone());
         }
-        let forge: Arc<dyn Forge> = Arc::new({
+        let forge = {
             let config = config.clone();
             tokio::task::spawn_blocking(move || connect(&config)).await??
-        });
+        };
         *self.forge.lock().unwrap_or_else(|e| e.into_inner()) = Some((url, forge.clone()));
         Ok(forge)
     }
@@ -393,17 +393,22 @@ impl Forge for Offline {
     }
 }
 
-fn connect(config: &Config) -> anyhow::Result<GitLab> {
+fn connect(config: &Config) -> anyhow::Result<Arc<dyn Forge>> {
     config.validate_project()?;
-    anyhow::ensure!(
-        config.provider.available(),
-        "GitHub connector is not available yet. You can configure this project in Settings."
-    );
     let key = config.credential_key();
     let url = &key;
+    // Both providers keep their token under the historical `gitlab-token` name.
     let token = read_secret(url, "gitlab-token")?;
     if token.is_empty() {
-        anyhow::bail!("Configure your GitLab token in Settings first");
+        anyhow::bail!(
+            "Configure your {} token in Settings first",
+            config.provider.label()
+        );
+    }
+    if config.provider == mrde_core::config::Provider::Github {
+        return Ok(Arc::new(
+            GitHub::new(&config.gitlab_url, &token)?.with_group(&config.group),
+        ));
     }
     let id = read_secret(url, "cf-id")?;
     let secret = read_secret(url, "cf-secret")?;
@@ -414,7 +419,9 @@ fn connect(config: &Config) -> anyhow::Result<GitLab> {
     if !secret.is_empty() {
         headers.push(("CF-Access-Client-Secret".into(), secret));
     }
-    Ok(GitLab::new(&config.gitlab_url, &token, &headers)?.with_group(&config.group))
+    Ok(Arc::new(
+        GitLab::new(&config.gitlab_url, &token, &headers)?.with_group(&config.group),
+    ))
 }
 
 pub fn load_projects() -> anyhow::Result<crate::projects::Projects> {
@@ -457,6 +464,8 @@ async fn enrich(env: &Env, config: &Config, queue: &mut [MergeRequest]) {
                 .iter()
                 .find(|p| p.id == mr.id && p.sha == mr.sha && p.changed_lines.is_some())
                 .cloned();
+            // Forges listing sizes with the queue (GitHub) need no diff download.
+            let sized = mr.changed_lines.is_some();
             tasks.spawn(async move {
                 let result = match known {
                     Some(known) => forge.summary(&id).await.map(|mut mr| {
@@ -466,6 +475,7 @@ async fn enrich(env: &Env, config: &Config, queue: &mut [MergeRequest]) {
                         mr.project = known.project;
                         mr
                     }),
+                    None if sized => forge.summary(&id).await,
                     None => forge.detail(&id).await.map(|detail| detail.mr),
                 };
                 (index, result)
@@ -864,6 +874,59 @@ mod tests {
             mr.pipeline = Some("success".into());
             Ok(mr)
         }
+    }
+    #[tokio::test]
+    async fn github_refresh_uses_queue_metadata_without_downloading_diffs() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::*};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v3/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "me"})),
+            )
+            .mount(&server)
+            .await;
+        let pull = serde_json::json!({
+            "number": 7, "title": "Add schedules", "body": "", "url": "https://github.com/acme/platform/pull/7",
+            "createdAt": "2026-11-06T10:00:00Z", "isDraft": false, "additions": 30, "deletions": 4,
+            "author": {"login": "alice"}, "headRefOid": "a".repeat(40), "baseRefOid": "b".repeat(40),
+            "repository": {"databaseId": 42, "nameWithOwner": "acme/platform", "sshUrl": "git@github.com:acme/platform.git"},
+            "labels": {"nodes": []}, "latestOpinionatedReviews": {"nodes": []},
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "PENDING"}}}]}
+        });
+        Mock::given(method("POST"))
+            .and(path("/api/graphql"))
+            .and(body_string_contains("author:me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {"search": {"pageInfo": {"hasNextPage": false}, "nodes": [pull]}}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let temp = tempfile::tempdir().unwrap();
+        let env = Env {
+            forge: Arc::new(GitHub::new(&server.uri(), "token").unwrap()),
+            cache: temp.path().to_path_buf(),
+        };
+        let mut config = config();
+        config.provider = mrde_core::config::Provider::Github;
+        config.gitlab_url = server.uri();
+        let Outcome::Queue(queue) = run(&env, config, Action::Refresh).await.unwrap() else {
+            panic!("expected the queue");
+        };
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].changed_lines, Some(34));
+        assert_eq!(queue[0].pipeline.as_deref(), Some("running"));
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(
+            requests.len(),
+            2,
+            "one identity and one search request, no per-PR diff: {:?}",
+            requests
+                .iter()
+                .map(|r| r.url.path().to_string())
+                .collect::<Vec<_>>()
+        );
     }
     fn env(forge: &Arc<FakeForge>, temp: &tempfile::TempDir) -> Env {
         Env {

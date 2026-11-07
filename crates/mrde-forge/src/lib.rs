@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use mrde_core::{config::MrRole, insights::Overlap, models::*};
 
+pub mod github;
 pub mod gitlab;
 pub mod uploads;
 

@@ -56,7 +56,7 @@ The project ID, provider, and URL namespace credentials. The cache namespace als
 group. The reserved imported `default` project retains the old URL identity for compatibility.
 Forge clients, SQLite keys, worktrees, reviews, and Threads use these boundaries. The GitLab
 adapter uses the [group merge request endpoint](https://docs.gitlab.com/api/merge_requests/#list-group-merge-requests)
-when scoped; GitHub configurations fail explicitly before any credential read or HTTP action.
+when scoped; the GitHub adapter adds an `org:`, `user:`, or `repo:` search qualifier.
 
 Project switching runs off the GPUI thread, rejects old action generations, clears selected
 content and image assets, and rebinds the image client. In-flight review operations retain
@@ -127,6 +127,25 @@ sequenceDiagram
   merged in the last 14 days, intersected by file path through `/diffs`.
 - Images: uploads go through the authenticated project uploads API; credentials are never
   sent to other hosts, and redirects are refused.
+
+## GitHub adapter
+
+`mrde-forge::github` implements the same `Forge` trait. Repositories are addressed by numeric
+ID (`/repositories/{id}`), so `MrId.project` stays numeric and renamed repositories keep
+working.
+
+- Queue: a GraphQL `search` per role filter (`review-requested`, `reviewed-by`, `assignee`,
+  `author`, plus the scope qualifier, `draft:false`), returning labels with colors,
+  `latestOpinionatedReviews`, `statusCheckRollup`, sizes, and head and base commits. Results
+  are kept for 60 seconds so the enrichment that follows each refresh costs no request;
+  queue entries that already carry a size never download diffs.
+- Detail: the pull request with `closingIssuesReferences` (GraphQL), its files
+  (`/pulls/{n}/files`, up to 3,000), and the merge base (`/compare/{base}...{head}`).
+- Approval: `GET /pulls/{n}` checks that the head is still the reviewed commit, then
+  `POST /pulls/{n}/reviews` with `event=APPROVE` and that `commit_id`.
+- Overlaps and merged history: `GET /pulls` (open, and closed within 14 days) and their files.
+- Requests carry `Authorization: Bearer`, `X-GitHub-Api-Version`, and a `User-Agent`; redirects
+  are refused, and rate-limit exhaustion is reported as such.
 
 ## Caching
 

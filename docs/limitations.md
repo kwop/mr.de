@@ -11,8 +11,12 @@ mr.de is experimental. These limits are known; others certainly exist.
 
 ## Projects and providers
 
-- Multiple GitLab projects are supported, including separate accounts on one host and optional
-  group scopes. GitHub profiles are configuration-only until its connector is implemented.
+- Multiple GitLab and GitHub projects are supported, including separate accounts on one host
+  and optional group, owner, or repository scopes.
+- GitHub: Super Resolver is not available yet (it bails with a message); images attached to
+  private repositories (`user-attachments`) do not load, because GitHub serves them to browser
+  sessions only; the search API returns at most 1,000 pull requests per role; each refresh
+  uses one GraphQL search per role filter (Reviewer uses two) plus `GET /user`.
 - Manually edited TOML requires a restart. Removing a profile is currently done in TOML;
   stored credentials, caches, and worktrees are retained.
 
