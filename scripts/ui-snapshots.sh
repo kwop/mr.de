@@ -5,7 +5,7 @@
 set -eu
 out="${1:-target/ui-snapshots}"
 [ "$#" -gt 0 ] && shift
-scenarios="${*:-queue detail:description detail:files detail:review detail:statistics focus:structure focus:history focus:risks focus:checks focus:visual confirm worktrees settings logs open}"
+scenarios="${*:-queue detail:description focus:changes detail:files detail:review detail:statistics focus:structure focus:history focus:risks focus:checks focus:visual confirm worktrees settings logs open}"
 mkdir -p "$out"
 cargo build --locked -p mrde --quiet
 for scenario in $scenarios; do

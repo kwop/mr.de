@@ -112,7 +112,12 @@ impl Cockpit {
             let fresh = argument == "fresh" || std::env::var("MRDE_SCENARIO_FRESH").is_ok();
             if !fresh {
                 let id = detail.mr.id.clone();
-                this.risk = Some((id.clone(), Box::new(demo::risk(&detail))));
+                let report = demo::risk(&detail);
+                // The queue's miniature radar shows the same cached profile.
+                if let Some(mr) = this.queue.iter_mut().find(|mr| mr.id == id) {
+                    mr.risk = Some(mrde_core::risk::RiskSummary::from(&report));
+                }
+                this.risk = Some((id.clone(), Box::new(report)));
                 this.risk_baseline = Some((id.clone(), demo::baseline()));
                 this.insights = Some((id.clone(), Box::new(demo::insights(&detail))));
                 this.tour = Some((id.clone(), detail.mr.sha.clone(), demo::tour()));
@@ -233,9 +238,6 @@ impl Cockpit {
                 }
             })
             .detach();
-        }
-        if std::env::var("MRDE_SCENARIO_THEME").as_deref() == Ok("light") {
-            gpui_component::Theme::change(gpui_component::ThemeMode::Light, Some(window), cx);
         }
 
         if let Ok(query) = std::env::var("MRDE_SCENARIO_SEARCH") {

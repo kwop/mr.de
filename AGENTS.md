@@ -74,6 +74,8 @@ Lessons from previous sessions. Details and the GPUI layout pitfalls are in `doc
 - Add `.debug_selector(|| "name".into())` and a temporary GPUI test: `cx.simulate_resize(size(px(1100.), px(1109.)))`, `draw(&root, cx)`, then print `cx.debug_bounds("name")`. Remove the test afterwards. The test `draw()` helper renders at 1280×900.
 - The test platform can lay out correctly while the real app does not, because GPUI text measurement depends on call order. When a screenshot contradicts a passing test, temporarily print real bounds with `.on_children_prepainted(|b, _, _| eprintln!(...))` behind an environment variable, read stderr from a real or preview run, then remove it.
 - `debug_bounds` keeps selectors from earlier frames: assert absence only for elements never rendered.
+- In GPUI tests, a wheel event over the reader scrolls it twice, so `click_action` can overshoot long tabs. Set `detail_scroll` directly instead (`reveal` in `ui/tests/risk.rs`). `MRDE_SCENARIO_SCROLL` is in points; captures are 2× pixels.
+- Backend tests get their settings directory from `Env::settings`: never read the real `~/.config/mrde`, where a user `risk.toml` could run lint commands.
 - Tests never attach native Ghostty surfaces: under `cfg(test)`, `Threads::launched` records the terminal commands instead. The preview always runs a local shell (`use_preview_terminal`), never Claude Code; `MRDE_SCENARIO=ask` shows a questions thread.
 - `finish()` in `ui/tests.rs` waits for the background job. `FakeExecutor` bails on unknown actions: add an arm for every new `Action`.
 - In modules that `use gpui::{prelude::*, *}`, unit tests need `#[::core::prelude::v1::test]`, because GPUI exports its own `test` attribute.

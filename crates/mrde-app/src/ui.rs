@@ -86,6 +86,8 @@ pub struct Cockpit {
     risk_baseline: Option<(MrId, mrde_core::risk::Baseline)>,
     risk_axis: Option<mrde_core::risk::Axis>,
     risk_selected_file: Option<String>,
+    /// The selected file opened under its findings in the axis evidence, not in the list.
+    risk_file_in_evidence: bool,
     risk_file: Option<(MrId, String, mrde_core::risk::FileContext)>,
     /// Invalidates background presentation models after new detail/statistics arrive.
     presentation_revision: u64,
@@ -385,6 +387,7 @@ impl Cockpit {
             risk_baseline: None,
             risk_axis: None,
             risk_selected_file: None,
+            risk_file_in_evidence: false,
             risk_file: None,
             insights: None,
             tour: None,
@@ -1733,7 +1736,7 @@ impl Cockpit {
                                 detail.files.get(index).map(|file| {
                                     let stat =
                                         cache.lookup.get(&file.new_path).map(|i| &cache.files[*i]);
-                                    Self::file_row(file, stat, cache.widest, index)
+                                    Self::file_row(file, stat, cache.widest, index, vec![])
                                 })
                             })
                             .collect()
@@ -1744,7 +1747,14 @@ impl Cockpit {
             )
             .into_any_element()
     }
-    fn file_row(file: &ChangedFile, stat: Option<&FileStat>, widest: u64, index: usize) -> Div {
+    /// A changed file: path, `marks` (finding chips), line counts, and a size bar.
+    fn file_row(
+        file: &ChangedFile,
+        stat: Option<&FileStat>,
+        widest: u64,
+        index: usize,
+        marks: Vec<AnyElement>,
+    ) -> Div {
         let (directory, name) = match file.new_path.rsplit_once('/') {
             Some((directory, name)) => (format!("{directory}/"), name.to_string()),
             None => (String::new(), file.new_path.clone()),
@@ -1799,6 +1809,7 @@ impl Cockpit {
                         ]),
                     ),
             )
+            .children(marks)
             .when(renamed, |row| {
                 row.child(
                     div()

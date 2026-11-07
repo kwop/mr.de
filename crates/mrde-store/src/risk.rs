@@ -42,6 +42,7 @@ mod tests {
                 source: mrde_core::models::StatsSource::Git,
                 files: vec![],
             },
+            excluded: vec![],
             pending_commands: vec![],
         };
         store.save_risk("project-a", &id, &report).unwrap();

@@ -3,9 +3,29 @@
 Open **Changes** and select **Calculate risk**. MR.DE prepares the MR worktree when needed,
 then measures the base-to-head change locally. It never starts Claude for this calculation.
 The experimental tab keeps the existing Files, Statistics, and History tabs available.
-Click a disktree file or a file row to see its recent commits, line ownership percentages
-from `git blame`, and related risk findings. Click an axis for evidence and **Ask Claude
-about this axis** to open an explicit, interactive, read-only discussion in Threads.
+
+![Changes tab](images/changes.png)
+
+- **Verdict.** The review depth the profile asks for, its mean, and the reason: the axes at
+  or above the deep-review threshold, or the mean's position against the thresholds.
+  Unmeasured axes are named; they are left out of the mean.
+- **Radar.** The blue polygon is this MR, the dashed gray one the team median, and the dashed
+  red ring the deep-review threshold. Points are green below the standard-review mean,
+  amber up to the deep-review threshold, and red beyond. An unmeasured axis has a dashed
+  spoke, reads n/a, and the outline crosses it with a fainter dashed segment: unknown is
+  never drawn as zero.
+- **Axis table.** Every axis with its score, a bar with the team median as a tick, and the
+  measurement behind it (lines, files, CCN, edges…). Hover for the method; click a row or a
+  radar label for the evidence.
+- **Evidence.** Grouped by file: per-file axes (size, test gap, sensitive paths, complexity)
+  on one row each; debt as the added line, coupling as `dependency` or `import` targets,
+  warnings with their rule. **Ask Claude about this axis** opens an explicit, interactive,
+  read-only discussion in Threads.
+- **Changed files.** Largest first, like the Files tab, with a chip per finding (`untested`,
+  `debt 2`, `coupling 1`…) colored by the axis severity, and `not scored` on lockfiles and
+  generated code. Click a file, a disktree tile, or an evidence file to open its findings,
+  line owners from `git blame` at the MR head, and recent commits, those of this MR marked;
+  it opens under the row you clicked and loads once per commit.
 
 ## Configuration
 
@@ -45,11 +65,16 @@ These measurements guide review depth; they do not establish correctness or safe
 | --- | --- |
 | Diff size / files | Merge-base-to-head `git diff --numstat`; renames count once. Binary files have no line counts. |
 | Complexity | Net cyclomatic complexity delta from Lizard XML; negative deltas normalize to zero. Missing reports for any changed source file make this axis unavailable. |
-| Test gap | Uncovered changed executable lines from LCOV/Cobertura. Report freshness cannot be proven. Without a report, an explicitly marked test-file/source-file ratio heuristic is used. |
+| Test gap | Untested changed lines. With a configured LCOV/Cobertura report: changed executable lines it marks as uncovered (report freshness cannot be proven). Without one, an explicitly marked heuristic: added source lines whose file has no related test change in the MR. A test file is related when it has the same name (`user_test.go`, `User.test.tsx`, `tests/user.rs`), lives in the file's own module directory (`src/user/tests.rs` for `src/user.rs`), or is a generic `tests.rs` beside it; inline tests (`#[cfg(test)]`, `#[test]`, `describe(`, `def test_`, `func Test`) count too. A two-line fix without tests scores near zero; a large untested change scores high. |
 | Sensitive paths | Changed-line share weighted by the highest matching glob, without counting overlapping rules twice. |
-| Coupling | Added Cargo/npm/Dart/Go dependencies plus new textual import targets; explicitly heuristic, not a compiler-resolved dependency graph. |
+| Coupling | Added Cargo/npm/Dart/Go dependencies, plus modules that existing product files import for the first time (`serde`, `crate::store`), each counted once per file. A new file's imports describe the new module and do not count; standard-library and `self`/`super` imports are ignored. Explicitly heuristic, not a compiler-resolved dependency graph. |
 | Conventions | New diagnostics by path, rule and message compared with base. Line shifts alone do not add warnings. JSON, Clippy, ESLint and regex output are supported. |
-| Debt | Weighted regex matches on added lines; matches may include comments and strings. |
+| Debt | Weighted regex matches on added product-code lines; test files and Rust inline test modules (from `#[cfg(test)]` on) are skipped. Matches may include comments and strings. The default `any` rule matches TypeScript's `any` type only. |
+
+No axis counts lockfiles, generated or vendored code (`Cargo.lock`, `go.sum`, `*.pb.go`,
+`vendor/`, `node_modules/`, `mocks/`…), nor files matching `exclude`: the axis methods say
+how many were left out, and the file list marks them `not scored`. Changing what a scorer
+measures changes the configuration fingerprint, so cached profiles are measured again.
 
 Click **Update team median** to request the most recent merged MRs from GitLab, ordered
 by merge time (GitLab versions supporting `order_by=merged_at`). The default sample is 30,
@@ -59,8 +84,7 @@ excluded per axis. The radar shows each axis's sample count. Historical test gap
 the file-ratio heuristic because a current coverage report cannot describe old commits.
 A sparse baseline is not representative of the whole team.
 
-The blue polygon describes this MR; dashed gray is the median. Missing axes leave gaps,
-and a partial profile has no filled polygon. Queue miniatures use cached scores only;
+Queue miniatures draw the same polygon from cached scores only;
 **Risk** sorts measured MRs from highest mean to lowest, with unavailable scores last.
 SQLite stores full profiles by project, repository, MR, base/head SHA, and configuration
 fingerprint. **Calculate risk** explicitly recomputes when local reports or tools change.
@@ -75,8 +99,8 @@ image/reader scrolling. Preview the panel with `MRDE_SCENARIO=focus:changes carg
 the complete desktop application's existing macOS integrations are not Linux-validated.
 
 Preview variations: `MRDE_SCENARIO_FILE=first` opens file ownership/history;
-`MRDE_SCENARIO_AXIS=lint` shows an unavailable axis; `MRDE_SCENARIO_THEME=light`
-checks the radar component's light palette. `MRDE_SCENARIO_RISK_FILE=<report.json>`
+`MRDE_SCENARIO_AXIS=debt` shows an axis's evidence (`lint` an unavailable one);
+`MRDE_SCENARIO_FRESH=1` shows the tab before any calculation. `MRDE_SCENARIO_RISK_FILE=<report.json>`
 loads a locally measured report in preview mode only, without credentials.
 
 ```mermaid
