@@ -42,6 +42,7 @@ pub(super) fn cached(
             &config.namespace(),
             &detail.mr.id,
             &detail.mr.sha,
+            &detail.mr.base_sha,
             &risk.fingerprint(),
         )?
         .filter(|r| r.profile.base_sha == detail.mr.base_sha))
@@ -158,6 +159,7 @@ pub(super) async fn baseline(
                 &config.namespace(),
                 id,
                 &historical.sha,
+                &historical.base_sha,
                 &historical_config.fingerprint(),
             )? {
                 return Ok::<_, anyhow::Error>(cached.profile);

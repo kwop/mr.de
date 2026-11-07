@@ -311,6 +311,22 @@ mod tests {
         }
     }
     #[test]
+    fn baseline_counts_only_available_measurements_per_axis() {
+        let baseline = Baseline::from_profiles(
+            &[
+                profile(&[Some(2.), None]),
+                profile(&[Some(6.), Some(8.)]),
+                profile(&[None, Some(10.)]),
+            ],
+            30,
+            3,
+        );
+        assert_eq!(baseline.medians[0], Some(4.));
+        assert_eq!(baseline.medians[1], Some(9.));
+        assert_eq!(baseline.samples[..3], [2, 2, 0]);
+        assert_eq!(baseline.medians[2], None);
+    }
+    #[test]
     fn normalization_interpolates_clamps_and_rejects_invalid_curves() {
         let points = [[0., 0.], [50., 2.], [300., 5.], [1000., 8.], [3000., 10.]];
         for (raw, score) in [

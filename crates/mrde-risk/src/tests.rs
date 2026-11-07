@@ -45,17 +45,19 @@ fn fixture() -> MrContext {
             )
         })
         .collect();
-    let mut config = RiskConfig::default();
-    config.sensitive = vec![
-        SensitiveGlob {
-            glob: "src/auth*".into(),
-            weight: 1.,
-        },
-        SensitiveGlob {
-            glob: "src/**".into(),
-            weight: 0.5,
-        },
-    ];
+    let config = RiskConfig {
+        sensitive: vec![
+            SensitiveGlob {
+                glob: "src/auth*".into(),
+                weight: 1.,
+            },
+            SensitiveGlob {
+                glob: "src/**".into(),
+                weight: 0.5,
+            },
+        ],
+        ..Default::default()
+    };
     MrContext {
         worktree: "/workspace".into(),
         base_sha: "a".repeat(40),
@@ -237,7 +239,11 @@ async fn two_commit_repository_measures_all_axes_without_modifying_dirty_worktre
     config.complexity.command = vec!["/bin/sh".into(), "-c".into(), "cat complexity.xml".into()];
     config.lint = vec![Command {
         id: "lint".into(),
-        command: vec!["/bin/sh".into(), "-c".into(), "cat diagnostics.json".into()],
+        command: vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "printf broken > complexity.xml; cat diagnostics.json".into(),
+        ],
         format: "json".into(),
         approved: true,
         ..Default::default()

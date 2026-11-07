@@ -338,10 +338,9 @@ fn dependencies(path: &str, text: &str) -> Result<BTreeSet<String>> {
                 if let Some(entry) = line
                     .strip_prefix("require ")
                     .or_else(|| block.then_some(line))
+                    && let Some(name) = entry.split_whitespace().next()
                 {
-                    if let Some(name) = entry.split_whitespace().next() {
-                        names.insert(name.into());
-                    }
+                    names.insert(name.into());
                 }
             }
         }
@@ -472,7 +471,7 @@ impl RiskScorer for ComplexityScorer {
         Axis::Complexity
     }
     async fn measure(&self, ctx: &MrContext) -> Result<RawMetric> {
-        let (before, after) = ctx.snapshot_paths()?;
+        let (before, after) = ctx.snapshot_paths(&ctx.config.complexity).await?;
         let files: Vec<_> = ctx.files.iter().filter(|f| source(f.path())).collect();
         ensure!(
             !files.is_empty(),
@@ -547,9 +546,9 @@ impl RiskScorer for LintScorer {
     }
     async fn measure(&self, ctx: &MrContext) -> Result<RawMetric> {
         ensure!(!ctx.config.lint.is_empty(), "No lint commands configured");
-        let (before, after) = ctx.snapshot_paths()?;
         let mut details = Vec::new();
         for config in &ctx.config.lint {
+            let (before, after) = ctx.snapshot_paths(config).await?;
             let mut diagnostics = Vec::new();
             for root in [&before, &after] {
                 let result = command(ctx, config, root, vec![]).await?;

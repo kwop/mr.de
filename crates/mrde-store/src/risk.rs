@@ -11,29 +11,13 @@ impl Store {
         namespace: &str,
         id: &MrId,
         head: &str,
+        base: &str,
         config: &str,
     ) -> anyhow::Result<Option<RiskReport>> {
-        let text:Option<String>=self.connection.query_row("SELECT payload FROM risk_profiles WHERE namespace=?1 AND project_id=?2 AND iid=?3 AND head_sha=?4 AND config_key=?5 ORDER BY computed_at DESC LIMIT 1",params![namespace,id.project,id.iid,head,config],|r|r.get(0)).optional()?;
+        let text:Option<String>=self.connection.query_row("SELECT payload FROM risk_profiles WHERE namespace=?1 AND project_id=?2 AND iid=?3 AND head_sha=?4 AND config_key=?5 AND base_sha=?6 ORDER BY computed_at DESC LIMIT 1",params![namespace,id.project,id.iid,head,config,base],|r|r.get(0)).optional()?;
         text.map(|s| serde_json::from_str(&s))
             .transpose()
             .context("Invalid cached risk profile")
-    }
-    pub fn latest_risks(&self, namespace: &str) -> anyhow::Result<Vec<(MrId, RiskReport)>> {
-        let mut statement=self.connection.prepare("SELECT project_id,iid,payload FROM risk_profiles WHERE namespace=?1 ORDER BY computed_at DESC")?;
-        let rows = statement.query_map([namespace], |r| {
-            Ok((
-                MrId {
-                    project: r.get(0)?,
-                    iid: r.get(1)?,
-                },
-                r.get::<_, String>(2)?,
-            ))
-        })?;
-        rows.map(|r| {
-            let (id, text) = r?;
-            Ok((id, serde_json::from_str(&text)?))
-        })
-        .collect()
     }
 }
 #[cfg(test)]
@@ -63,16 +47,27 @@ mod tests {
         store.save_risk("project-a", &id, &report).unwrap();
         assert!(
             store
-                .risk("project-a", &id, "head", "config-v1")
+                .risk("project-a", &id, "head", "base", "config-v1")
                 .unwrap()
                 .is_some()
+        );
+        assert!(
+            store
+                .risk("project-a", &id, "head", "another-base", "config-v1")
+                .unwrap()
+                .is_none()
         );
         for (namespace, head, key) in [
             ("project-b", "head", "config-v1"),
             ("project-a", "new-head", "config-v1"),
             ("project-a", "head", "config-v2"),
         ] {
-            assert!(store.risk(namespace, &id, head, key).unwrap().is_none());
+            assert!(
+                store
+                    .risk(namespace, &id, head, "base", key)
+                    .unwrap()
+                    .is_none()
+            );
         }
     }
 }

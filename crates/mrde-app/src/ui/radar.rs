@@ -49,7 +49,7 @@ fn drawing(
                 px(96.)
             };
             let line = cx.theme().border;
-            let blue = cx.theme().primary;
+            let blue = cx.theme().link;
             let gray = cx.theme().muted_foreground;
             for ring in if mini {
                 vec![10.]
@@ -112,10 +112,22 @@ fn drawing(
     .size_full()
 }
 pub(super) fn miniature(scores: [Option<f64>; 8]) -> AnyElement {
+    let known: Vec<_> = scores.iter().flatten().copied().collect();
+    let tooltip = if known.is_empty() {
+        "Risk not calculated".to_string()
+    } else {
+        format!(
+            "Risk {:.1}/10 · {}/8 axes · cached",
+            known.iter().sum::<f64>() / known.len() as f64,
+            known.len()
+        )
+    };
     div()
+        .id("risk-miniature")
         .w(px(32.))
         .h(px(32.))
         .flex_shrink_0()
+        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .child(drawing(scores, None, true))
         .into_any_element()
 }
@@ -125,12 +137,12 @@ pub(super) fn radar(
     cx: &mut Context<Cockpit>,
 ) -> AnyElement {
     let scores = std::array::from_fn(|i| profile.axes[i].score);
-    let center = point(px(200.), px(170.));
+    let center = point(px(210.), px(170.));
     let mut view = div()
         .debug_selector(|| "risk-radar".into())
         .relative()
         .bg(cx.theme().background)
-        .w(px(400.))
+        .w(px(420.))
         .h(px(340.))
         .flex_shrink_0()
         .child(drawing(scores, baseline.map(|b| b.medians), false));
@@ -157,15 +169,15 @@ pub(super) fn radar(
                 score.unavailable.as_deref().unwrap_or("Not measured")
             ),
         };
-        let location = vertex(center, px(142.), i, 10.);
+        let location = vertex(center, px(150.), i, 10.);
         view = view.child(
             div()
                 .id(SharedString::from(format!("risk-axis-{}", axis.id())))
                 .debug_selector(move || format!("risk-axis-{}", axis.id()))
                 .absolute()
-                .left(location.x - px(55.))
+                .left(location.x - px(50.))
                 .top(location.y - px(17.))
-                .w(px(110.))
+                .w(px(100.))
                 .text_center()
                 .text_size(px(11.))
                 .line_height(px(15.))
@@ -208,7 +220,7 @@ pub(super) fn radar(
                             .rounded_full()
                             .border_2()
                             .border_color(cx.theme().background)
-                            .bg(cx.theme().primary),
+                            .bg(cx.theme().link),
                     )
                     .tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
                     .on_click(cx.listener(move |this, _, _, cx| {
