@@ -110,14 +110,22 @@ impl MrReference {
                     .and_then(|rest| rest.strip_prefix('/'))
                     .unwrap_or_default()
             };
-            let Some((project, rest)) = path.split_once("/-/merge_requests/") else {
+            // GitLab merge requests and GitHub pull requests.
+            let Some((project, rest)) = path
+                .split_once("/-/merge_requests/")
+                .or_else(|| path.split_once("/pull/"))
+            else {
                 anyhow::bail!("This link is not a merge request.");
             };
             (project, rest.split('/').next().unwrap_or_default())
-        } else if let Some((project, iid)) = input.rsplit_once('!') {
+        } else if let Some((project, iid)) =
+            input.rsplit_once('!').or_else(|| input.rsplit_once('#'))
+        {
             (project, iid)
         } else {
-            anyhow::bail!("Paste a merge request link or a reference such as group/project!123.");
+            anyhow::bail!(
+                "Paste a merge request link, or a reference such as group/project!123 or owner/repo#123."
+            );
         };
         let iid: u64 =
             iid.parse().ok().filter(|iid| *iid > 0).ok_or_else(|| {
@@ -265,6 +273,7 @@ mod tests {
                 7,
             ),
             ("acme/platform!42", "acme/platform", 42),
+            ("acme/platform#43", "acme/platform", 43),
         ] {
             assert_eq!(
                 MrReference::parse(input, instance).unwrap(),
@@ -281,6 +290,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(prefixed.project, "acme/platform");
+        let pull = MrReference::parse(
+            "https://github.com/acme/platform/pull/7/files",
+            "https://github.com",
+        )
+        .unwrap();
+        assert_eq!((pull.project.as_str(), pull.iid), ("acme/platform", 7));
     }
 
     #[test]

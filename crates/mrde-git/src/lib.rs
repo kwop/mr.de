@@ -128,8 +128,8 @@ impl Worktrees {
             }
             return Ok(worktree);
         }
-        // GitLab's target-project MR ref also handles forks.
-        let reference = format!("refs/merge-requests/{}/head", detail.mr.id.iid);
+        // The target project's MR ref also covers forks: GitLab `merge-requests`, GitHub `pull`.
+        let reference = head_ref(detail);
         git(&repository, &["fetch", "origin", &reference]).await?;
         let fetched = git(&repository, &["rev-parse", "FETCH_HEAD"]).await?;
         if fetched != detail.mr.sha {
@@ -418,6 +418,30 @@ pub async fn ensure_clean(worktree: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merge_request_and_pull_request_heads_use_their_forge_ref() {
+        let detail = |url: &str| -> MrDetail {
+            serde_json::from_value(serde_json::json!({
+                "mr": {"id":{"project":1,"iid":7},"title":"T","description":"","project":"p",
+                    "author":"a","web_url":url,"sha":"a","base_sha":"b",
+                    "created_at":"2026-01-01T00:00:00Z","labels":[],"pipeline":null,
+                    "approvals":null,"changed_lines":null},
+                "files":[],"issues":[],"ssh_url":"git@example.invalid:p.git"
+            }))
+            .unwrap()
+        };
+        assert_eq!(
+            head_ref(&detail(
+                "https://gitlab.example.com/acme/p/-/merge_requests/7"
+            )),
+            "refs/merge-requests/7/head"
+        );
+        assert_eq!(
+            head_ref(&detail("https://github.com/acme/p/pull/7")),
+            "refs/pull/7/head"
+        );
+    }
     #[tokio::test]
     async fn detects_untracked_work_before_cleanup_or_review() {
         let dir = tempfile::tempdir().unwrap();
@@ -576,6 +600,13 @@ mod tests {
         );
         assert!(numstat(repo, "not-a-sha", &head).await.is_err());
     }
+}
+
+/// The target repository's ref for the head of an MR or a GitHub pull request.
+fn head_ref(detail: &MrDetail) -> String {
+    let github = detail.mr.web_url.contains("/pull/") && !detail.mr.web_url.contains("/-/");
+    let kind = if github { "pull" } else { "merge-requests" };
+    format!("refs/{kind}/{}/head", detail.mr.id.iid)
 }
 
 pub mod resolver;

@@ -112,10 +112,22 @@ fn issue_references(text: &str) -> Vec<(String, u64)> {
 /// else in the description, else the only related issue. Merely mentioned issues would
 /// add unrelated labels (other statuses and priorities).
 pub fn primary_tickets<'a>(mr: &MergeRequest, issues: &'a [Issue]) -> Vec<&'a Issue> {
-    let own_project = mr.web_url.split("/-/").next().unwrap_or_default();
+    // GitLab: `<project>/-/merge_requests/1`; GitHub: `<project>/pull/1`.
+    let own_project = mr
+        .web_url
+        .split("/-/")
+        .next()
+        .and_then(|url| url.split("/pull/").next())
+        .unwrap_or_default();
     let matches = |reference: &(String, u64), issue: &Issue| {
-        // `/-/issues/12`, or `/-/work_items/12` on recent GitLab versions.
-        let Some((project, rest)) = issue.web_url.split_once("/-/") else {
+        // `/-/issues/12`, `/-/work_items/12` on recent GitLab versions, or `/issues/12` on
+        // GitHub.
+        let Some((project, rest)) = issue.web_url.split_once("/-/").or_else(|| {
+            issue
+                .web_url
+                .rsplit_once("/issues/")
+                .map(|(p, _)| (p, &issue.web_url[p.len() + 1..]))
+        }) else {
             return false;
         };
         let iid = rest
@@ -403,5 +415,26 @@ mod tests {
             1,
             "single related issue"
         );
+    }
+
+    #[test]
+    fn github_issue_links_match_references_in_pull_requests() {
+        let github = |project: &str, iid: u64| {
+            let mut found = issue(project, iid, &[]);
+            found.web_url = format!("https://github.com/acme/{project}/issues/{iid}");
+            found
+        };
+        let issues = [
+            github("platform", 3),
+            github("platform", 4),
+            github("web", 3),
+        ];
+        let mut pull = mr("Fix #3, see web#3", "");
+        pull.web_url = "https://github.com/acme/platform/pull/9".into();
+        let titles: Vec<String> = primary_tickets(&pull, &issues)
+            .iter()
+            .map(|i| i.title.clone())
+            .collect();
+        assert_eq!(titles, ["platform#3", "web#3"]);
     }
 }
