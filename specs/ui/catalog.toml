@@ -203,3 +203,10 @@ title = "Maximum image zoom returns to fit"
 scenario = "image:max"
 contracts = ["MRDE-IMAGE-006"]
 inspect = ["The magnifier shows a minus at 800% and the toolbar explains Click to fit.", "Inspect the cursor outline over both light and dark image areas."]
+
+[[story]]
+id = "threads.closed"
+title = "Closed thread history"
+scenario = "threads:closed"
+contracts = ["MRDE-RESOLVE-009"]
+inspect = ["Closed threads remain readable", "Reopen thread fits at minimum width", "No terminal starts automatically"]

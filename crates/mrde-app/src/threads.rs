@@ -27,6 +27,7 @@ pub struct Threads {
     jobs: HashMap<String, tokio::task::JoinHandle<()>>,
     stopping: HashSet<String>,
     selected: Option<String>,
+    show_closed: bool,
     session: Option<String>,
     pub(crate) sender: mpsc::Sender<Message>,
     receiver: mpsc::Receiver<Message>,
@@ -70,6 +71,7 @@ impl Threads {
             jobs: HashMap::new(),
             stopping: HashSet::new(),
             selected: None,
+            show_closed: false,
             session: None,
             sender,
             receiver,
@@ -119,6 +121,14 @@ impl Threads {
         self.visible = true;
         cx.notify();
     }
+    pub(crate) fn preview_closed(&mut self, cx: &mut Context<Self>) {
+        if let Some(thread) = self.records.first_mut() {
+            thread.close();
+        }
+        self.show_closed = true;
+        self.status = "Preview · closed thread history · no processes started".into();
+        cx.notify();
+    }
     /// `--ui-preview`: terminals run a harmless local shell, never Claude Code.
     pub(crate) fn use_preview_terminal(&mut self) {
         self.preview_terminal = true;
@@ -131,6 +141,7 @@ impl Threads {
         self.config = config;
         self.load_generation += 1;
         self.records.clear();
+        self.show_closed = false;
         self.selected = None;
         self.session = None;
         self.pending_terminal = None;
@@ -164,8 +175,10 @@ impl Threads {
         });
     }
     pub fn start(&mut self, detail: &MrDetail, cx: &mut Context<Self>) {
+        self.show_closed = false;
         if let Some(existing) = self.records.iter().find(|t| {
-            t.automated()
+            t.closed_at.is_none()
+                && t.automated()
                 && t.mr == detail.mr.id
                 && (t.state.active() || self.terminal_alive(&t.id, cx))
         }) {
@@ -190,8 +203,10 @@ impl Threads {
     /// Opens Claude Code read-only on the merge request, in a questions thread: no
     /// automation, rebase, or push. The same commit reuses its thread and session.
     pub fn ask(&mut self, ready: crate::backend::AskReady, cx: &mut Context<Self>) {
+        self.show_closed = false;
         let existing = self.records.iter().find(|t| {
-            t.kind == ThreadKind::Questions
+            t.closed_at.is_none()
+                && t.kind == ThreadKind::Questions
                 && t.mr == ready.mr
                 && t.remote_sha == ready.sha
                 && t.worktree.as_ref() == Some(&ready.worktree)
@@ -297,7 +312,67 @@ impl Threads {
         });
         cx.notify();
     }
+    fn close_thread(&mut self, id: &str, cx: &mut Context<Self>) {
+        // Stop/await the worker first; the newer generation rejects queued late writes.
+        self.stop(id, None, cx);
+        if let Some(thread) = self.records.iter_mut().find(|t| t.id == id) {
+            thread.close();
+            let thread = thread.clone();
+            self.save(thread);
+        }
+        if self
+            .pending_terminal
+            .as_ref()
+            .is_some_and(|(thread, _)| thread == id)
+        {
+            self.pending_terminal = None;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let keys: Vec<_> = self
+                .terminals
+                .keys()
+                .filter(|(thread, _)| thread == id)
+                .cloned()
+                .collect();
+            for key in keys {
+                if let Some(terminal) = self.terminals.remove(&key) {
+                    terminal.update(cx, |terminal, _| terminal.set_visible(false));
+                }
+            }
+        }
+        self.selected = self
+            .records
+            .iter()
+            .find(|t| t.closed_at.is_none())
+            .map(|t| t.id.clone());
+        self.session = None;
+        self.status = "Thread closed. Find its history under Closed threads.".into();
+        cx.notify();
+    }
+    fn reopen_thread(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.stopping.contains(id) {
+            return;
+        }
+        if let Some(thread) = self.records.iter_mut().find(|t| t.id == id) {
+            thread.reopen();
+            let thread = thread.clone();
+            self.save(thread);
+        }
+        self.show_closed = false;
+        self.selected = Some(id.into());
+        self.session = None;
+        self.status = "Thread reopened. No Claude process was started.".into();
+        cx.notify();
+    }
     fn resume(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self
+            .records
+            .iter()
+            .any(|t| t.id == id && t.closed_at.is_some())
+        {
+            return;
+        }
         if self.stopping.contains(id) {
             return;
         }
@@ -353,7 +428,7 @@ impl Threads {
                                 if self.records.iter().any(|t| t.id == thread.id) {
                                     continue;
                                 }
-                                if thread.state.active() {
+                                if thread.closed_at.is_none() && thread.state.active() {
                                     thread.generation += 1;
                                     thread.sequence = 0;
                                     thread.state = ResolverState::Interrupted;
@@ -422,10 +497,21 @@ impl Threads {
                 }
                 Message::TerminalReady(id, session) => {
                     self.stopping.remove(&id);
-                    self.status = "Automation stopped. Open a session or Resume when ready.".into();
+                    self.status = if self
+                        .records
+                        .iter()
+                        .any(|t| t.id == id && t.closed_at.is_some())
+                    {
+                        "Thread closed. Find its history under Closed threads.".into()
+                    } else {
+                        "Automation stopped. Open a session or Resume when ready.".into()
+                    };
                     if let Some(session) = session
                         && self.selected.as_ref() == Some(&id)
-                        && self.records.iter().any(|t| t.id == id && !t.state.active())
+                        && self
+                            .records
+                            .iter()
+                            .any(|t| t.id == id && t.closed_at.is_none() && !t.state.active())
                     {
                         self.pending_terminal = Some((id, session));
                     }
@@ -585,14 +671,50 @@ impl Render for Threads {
                     .mb_3()
                     .child("Threads"),
             );
-        if self.records.is_empty() {
+        let closed_count = self
+            .records
+            .iter()
+            .filter(|t| t.closed_at.is_some())
+            .count();
+        list = list.child(
+            div()
+                .debug_selector(|| "toggle-closed-threads".into())
+                .child(
+                    Button::new("toggle-closed-threads")
+                        .small()
+                        .ghost()
+                        .label(if self.show_closed {
+                            "Open threads".to_string()
+                        } else {
+                            format!("Closed threads ({closed_count})")
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.show_closed = !this.show_closed;
+                            this.selected = None;
+                            this.session = None;
+                            this.pending_terminal = None;
+                            cx.notify();
+                        })),
+                ),
+        );
+        if !self
+            .records
+            .iter()
+            .any(|t| t.closed_at.is_some() == self.show_closed)
+        {
             list = list.child(if self.loading {
                 "Loading threads…"
+            } else if self.show_closed {
+                "No closed threads."
             } else {
                 "Ask Claude or start Super Resolver from a merge request."
             });
         }
-        for thread in &self.records {
+        for thread in self
+            .records
+            .iter()
+            .filter(|t| t.closed_at.is_some() == self.show_closed)
+        {
             let id = thread.id.clone();
             let selected = self.selected.as_ref() == Some(&id);
             list = list.child(
@@ -612,7 +734,7 @@ impl Render for Threads {
                             format!(
                                 "!{} · {} · {}/3",
                                 thread.mr.iid,
-                                thread.state.label(),
+                                thread.label(),
                                 thread.attempts
                             )
                         } else {
@@ -677,7 +799,20 @@ impl Render for Threads {
                 .border_b_1()
                 .border_color(rgb(PANEL_LINE))
                 .child(div().flex_1().child(thread.label()));
-            if active {
+            if thread.closed_at.is_some() {
+                let id = id.clone();
+                toolbar = toolbar.child(
+                    div().debug_selector(|| "reopen-thread".into()).child(
+                        Button::new("reopen-thread")
+                            .small()
+                            .label("Reopen thread")
+                            .disabled(self.stopping.contains(&id))
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.reopen_thread(&id, cx)),
+                            ),
+                    ),
+                );
+            } else if active {
                 let id = id.clone();
                 toolbar = toolbar.child(
                     div().debug_selector(|| "stop-resolver".into()).child(
@@ -699,7 +834,7 @@ impl Render for Threads {
                     ),
                 );
             }
-            if let Some(session) = session {
+            if let Some(session) = session.filter(|_| thread.closed_at.is_none()) {
                 let id = id.clone();
                 let sid = session.id.clone();
                 toolbar = toolbar.child(
@@ -738,7 +873,14 @@ impl Render for Threads {
                         })),
                 );
             }
-            reader = reader.child(toolbar);
+            if thread.closed_at.is_none() {
+                let id = id.clone();
+                toolbar = toolbar.child(div().debug_selector(|| "close-thread".into()).child(
+                    Button::new("close-thread").small().label("Close thread")
+                        .tooltip("Stop activity and move this thread to Closed threads; preserve its worktree and history.")
+                        .on_click(cx.listener(move |this, _, _, cx| this.close_thread(&id, cx)))));
+            }
+            reader = reader.child(toolbar.flex_wrap());
             if let Some(question) = &thread.question {
                 reader = reader.child(div().p_3().text_color(rgb(WARNING)).child(question.clone()));
             }

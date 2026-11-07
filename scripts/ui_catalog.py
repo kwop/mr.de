@@ -23,7 +23,7 @@ ENV_KEYS = {
 TABS = {'description', 'changes', 'files', 'review', 'statistics', 'checks',
         'structure', 'history', 'risks', 'visual'}
 SCENARIOS = {'queue', 'projects', 'settings', 'settings:github', 'worktrees',
-             'logs', 'open', 'confirm', 'image', 'image:zoom', 'image:max', 'threads'}
+             'logs', 'open', 'confirm', 'image', 'image:zoom', 'image:max', 'threads', 'threads:closed'}
 SCENARIOS |= {f'{mode}:{tab}' for mode in ('focus', 'detail') for tab in TABS}
 
 

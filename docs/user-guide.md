@@ -401,3 +401,11 @@ stages and the start and result of every action. Errors from actions you start o
 automatically; periodic refresh errors stay in the status line. HTTP bodies and
 authentication headers are never logged, and secrets are redacted from error text. Logs are
 kept in memory only. Set `RUST_LOG=mrde=debug` for more detail on standard error.
+
+### Closing Threads
+
+Use **Close thread** in the thread toolbar to stop its worker, close all its embedded
+terminals, and move it to **Closed threads**. Its worktree and session history remain
+available, including after restarting MR.DE. **Reopen thread** returns it to the open
+list; use **Open terminal** or **Resume** explicitly to continue. **Close terminal**
+only closes the selected terminal and leaves the thread open.

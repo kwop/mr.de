@@ -3863,6 +3863,7 @@ dependencies = [
  "mrde-git",
  "mrde-store",
  "serde_json",
+ "tempfile",
  "tokio",
  "uuid",
 ]

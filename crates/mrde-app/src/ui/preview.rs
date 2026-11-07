@@ -49,7 +49,10 @@ impl Cockpit {
             self.threads_view = true;
             self.settings = false;
             self.threads.update(cx, |threads, cx| {
-                threads.preview(scenario == "threads:terminal", cx)
+                threads.preview(scenario == "threads:terminal", cx);
+                if scenario == "threads:closed" {
+                    threads.preview_closed(cx);
+                }
             });
             if scenario == "threads:terminal"
                 && std::env::var_os("MRDE_TERMINAL_NAVIGATE").is_some()

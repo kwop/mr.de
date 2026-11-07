@@ -100,6 +100,9 @@ pub enum ThreadKind {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResolverThread {
+    /// Closed threads keep their session history but never resume automatically.
+    #[serde(default)]
+    pub closed_at: Option<DateTime<Utc>>,
     pub id: String,
     pub instance: String,
     /// Threads saved before kinds existed are resolver runs.
@@ -130,6 +133,9 @@ impl ResolverThread {
         self.kind == ThreadKind::Resolver
     }
     pub fn label(&self) -> &'static str {
+        if self.closed_at.is_some() {
+            return "Closed";
+        }
         match self.kind {
             ThreadKind::Resolver => self.state.label(),
             ThreadKind::Questions => "Questions",
@@ -151,6 +157,26 @@ impl ResolverThread {
         self.state = ResolverState::NeedsInput;
         self.question = Some(question.clone());
         self.event(question);
+    }
+    pub fn close(&mut self) {
+        self.generation += 1;
+        self.sequence = 0;
+        self.state = ResolverState::Stopped;
+        self.closed_at = Some(Utc::now());
+        self.question = None;
+        for session in &mut self.sessions {
+            if session.finished_at.is_none() {
+                session.finished_at = self.closed_at;
+            }
+        }
+        self.event("Thread closed. Worktree and Claude session history were preserved.");
+    }
+    pub fn reopen(&mut self) {
+        self.generation += 1;
+        self.sequence = 0;
+        self.closed_at = None;
+        self.state = ResolverState::Stopped;
+        self.event("Thread reopened. Open a terminal or Resume explicitly to continue.");
     }
     pub fn resume(&mut self) {
         self.generation += 1;

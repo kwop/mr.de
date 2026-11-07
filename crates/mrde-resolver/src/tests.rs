@@ -253,3 +253,35 @@ fn threads_saved_before_kinds_existed_are_resolver_runs() {
     assert!(!questions.automated());
     assert_eq!(questions.label(), "Questions");
 }
+
+#[tokio::test]
+async fn closed_threads_survive_restart_and_cannot_be_replaced_by_a_late_worker_save() {
+    let temp = tempfile::tempdir().unwrap();
+    let original = thread();
+    save(temp.path(), &original).await.unwrap();
+    let mut closed = original.clone();
+    closed.close();
+    save(temp.path(), &closed).await.unwrap();
+    let mut late = original;
+    late.sequence = 1000;
+    save(temp.path(), &late).await.unwrap();
+    let loaded = load(temp.path(), &closed.instance).await.unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert!(loaded[0].closed_at.is_some());
+    assert_eq!(loaded[0].state, ResolverState::Stopped);
+    assert_eq!(loaded[0].label(), "Closed");
+    let mut reopened = loaded[0].clone();
+    reopened.reopen();
+    save(temp.path(), &reopened).await.unwrap();
+    let loaded = load(temp.path(), &closed.instance).await.unwrap();
+    assert!(loaded[0].closed_at.is_none());
+    assert!(!loaded[0].state.active());
+    let mut legacy = serde_json::to_value(&reopened).unwrap();
+    legacy.as_object_mut().unwrap().remove("closed_at");
+    assert!(
+        serde_json::from_value::<ResolverThread>(legacy)
+            .unwrap()
+            .closed_at
+            .is_none()
+    );
+}
