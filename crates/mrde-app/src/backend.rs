@@ -545,8 +545,8 @@ pub async fn run(env: &Env, config: Config, action: Action) -> anyhow::Result<Ou
                 }
             }
             let restored = Restored {
-                risk: risk::cached(env, &config, &detail)?,
-                baseline: risk::baseline_cached(env, &config, &detail)?,
+                risk: risk::cached(env, &config, &detail).unwrap_or_default(),
+                baseline: risk::baseline_cached(env, &config, &detail).unwrap_or_default(),
                 insights: store.cached(&cached_key("insights", &config, &detail)?)?,
                 tour: store.cached(&cached_key("tour", &config, &detail)?)?,
                 visual: store

@@ -28,6 +28,13 @@ impl Cockpit {
         self.start(Action::RiskFile(detail, path), "Loading file history…", cx);
     }
     pub(super) fn apply_risk(&mut self, id: MrId, report: Box<RiskReport>) {
+        if self
+            .risk
+            .as_ref()
+            .is_some_and(|(_, old)| old.profile.config_key != report.profile.config_key)
+        {
+            self.risk_baseline = None;
+        }
         for mr in &mut self.queue {
             if mr.id == id && mr.sha == report.profile.head_sha {
                 mr.risk = Some(RiskSummary::from(report.as_ref()));
@@ -112,7 +119,9 @@ impl Cockpit {
                 .verdict(&report.verdict_thresholds)
                 .map(|v| v.label())
                 .unwrap_or("Unavailable");
+            let note = |text: String| muted(text).text_color(cx.theme().muted_foreground);
             let mut info = div()
+                .text_color(cx.theme().foreground)
                 .min_w_0()
                 .flex_1()
                 .flex()
@@ -141,37 +150,40 @@ impl Cockpit {
                                 .unwrap_or_else(|| "n/a".into()),
                         ),
                 )
-                .child(muted(format!(
+                .child(note(format!(
                     "{}/8 axes · higher means more risk",
                     p.available()
                 )))
-                .child(muted("Blue: this MR · dashed gray: team median"));
+                .child(note("Blue: this MR · dashed gray: team median".into()));
             if let Some(b) = baseline {
-                info = info.child(muted(format!(
+                info = info.child(note(format!(
                     "{} of {} requested merged MRs; sample counts vary by axis.",
                     b.merged_mrs, b.requested
                 )));
                 for (index, n) in b.samples.iter().enumerate() {
-                    info = info.child(muted(format!("{}: n = {n}", Axis::ALL[index].label())));
+                    info = info.child(note(format!("{}: n = {n}", Axis::ALL[index].label())));
                 }
                 if !b.warnings.is_empty() {
-                    info = info.child(muted(format!(
+                    info = info.child(note(format!(
                         "{} unavailable or partial historical measurements. See debug logs.",
                         b.warnings.len()
                     )));
                 }
             } else {
-                info=info.child(muted("No team baseline yet. Update it explicitly; historical commits absent from the local repository are reported as unavailable."));
+                info=info.child(note("No team baseline yet. Update it explicitly; historical commits absent from the local repository are reported as unavailable.".into()));
             }
             view = view.child(
-                card().child(
-                    div()
-                        .flex()
-                        .items_start()
-                        .gap_3()
-                        .child(super::radar::radar(p, baseline, cx))
-                        .child(info),
-                ),
+                card()
+                    .bg(cx.theme().background)
+                    .border_color(cx.theme().border)
+                    .child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap_3()
+                            .child(super::radar::radar(p, baseline, cx))
+                            .child(info),
+                    ),
             );
             for pending in &report.pending_commands {
                 let key = pending.key.clone();

@@ -23,6 +23,9 @@ analysis.
   and size, or by date or diff size. Labels come with their GitLab colors, including those of
   the linked ticket when teams label tickets rather than merge requests. Search the queue
   (**⌘K**), filter it by labels from the sidebar, or open any merge request from its link.
+- **Changes and risk radar.** Eight configurable risk axes, a per-axis team median,
+  cached queue miniatures and risk sorting. Select a disktree file to see line ownership,
+  history and findings; axis discussions start Claude only on click.
 - **Review context panel.** Pre-review risks, compliance, analysis findings, the ticket, and
   approvals beside the reader; collapsible to a rail of counters (**⌘⌥B**).
 - **Reader.** Markdown descriptions with tables, images from GitLab uploads, and Mermaid
@@ -98,6 +101,15 @@ cargo install --locked --path crates/mrde-app   # installs `mrde` in ~/.cargo/bi
 ```
 
 For a signed `.app` with Touch ID support, see [macOS signing and Touch ID](docs/touch-id.md).
+
+## Risk configuration
+
+Copy [`config/risk.example.toml`](config/risk.example.toml) to `~/.config/mrde/risk.toml`.
+Override it per profile in `~/.config/mrde/projects/<id>/risk.toml` and per repository in
+`risk.toml`. The example documents all normalization curves, sensitive globs and weights,
+coverage, lint commands, debt regexes, baseline size and verdict thresholds. Repository
+commands need explicit approval. Missing tools or historical commits stay unavailable.
+See [the risk guide](docs/risk.md) for measurement limits, sample counts and cache behavior.
 
 ## Security and privacy
 

@@ -122,6 +122,21 @@ impl Cockpit {
             }
             this.risk_colors = std::env::var("MRDE_SCENARIO_RISK").is_ok();
             this.review_level = Some(ReviewLevel::Deep);
+            if let Ok(axis) = std::env::var("MRDE_SCENARIO_AXIS") {
+                this.risk_axis = mrde_core::risk::Axis::ALL
+                    .into_iter()
+                    .find(|a| a.id() == axis);
+            }
+            if std::env::var("MRDE_SCENARIO_FILE").as_deref() == Ok("first")
+                && let Some(file) = demo::stats(&detail).files.first()
+            {
+                this.risk_selected_file = Some(file.path.clone());
+                this.risk_file = Some((
+                    detail.mr.id.clone(),
+                    detail.mr.sha.clone(),
+                    demo::file_context(&file.path),
+                ));
+            }
             this.detail = Some(Box::new(detail));
             this.detail_tab = tab(argument);
         };
@@ -192,6 +207,37 @@ impl Cockpit {
             project.group = "acme/platform".into();
             self.project_inputs(&project, window, cx);
         }
+        // Explicit preview-only fixture: permits offline visual checks with locally measured data.
+        if let Some(file) = std::env::var_os("MRDE_SCENARIO_RISK_FILE") {
+            let read = cx.background_executor().spawn(async move {
+                serde_json::from_str::<mrde_core::risk::RiskReport>(
+                    &std::fs::read_to_string(file).map_err(anyhow::Error::from)?,
+                )
+                .map_err(anyhow::Error::from)
+            });
+            cx.spawn(async move |this, cx| {
+                if let Ok(report) = read.await {
+                    let _ = this.update(cx, |this, cx| {
+                        if let Some(detail) = &mut this.detail {
+                            detail.mr.sha = report.profile.head_sha.clone();
+                            detail.mr.base_sha = report.profile.base_sha.clone();
+                            detail.mr.title = "Local risk report".into();
+                            detail.mr.labels.clear();
+                            detail.mr.ticket_labels.clear();
+                            let id = detail.mr.id.clone();
+                            this.risk_baseline = None;
+                            this.apply_risk(id, Box::new(report));
+                            cx.notify();
+                        }
+                    });
+                }
+            })
+            .detach();
+        }
+        if std::env::var("MRDE_SCENARIO_THEME").as_deref() == Ok("light") {
+            gpui_component::Theme::change(gpui_component::ThemeMode::Light, Some(window), cx);
+        }
+
         if let Ok(query) = std::env::var("MRDE_SCENARIO_SEARCH") {
             self.search
                 .update(cx, |input, cx| input.set_value(query.clone(), window, cx));

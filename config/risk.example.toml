@@ -5,6 +5,7 @@ baseline_count = 30 # Last merged MRs of this GitLab repository, not the whole g
 timeout_seconds = 60 # Per scorer/command; a failure produces n/a for that axis.
 coverage_path = "coverage/lcov.info" # Optional, relative to the worktree; Cobertura XML also supported.
 # No report: explicitly labelled test-file heuristic. No modified source lines: n/a.
+# Content-based scorers skip these files; diff size and file totals still count the whole MR.
 exclude = ["**/vendor/**", "**/node_modules/**", "**/target/**", "**/*.lock"]
 
 # Raw measurement -> risk in 0..10. Scores must never decrease; endpoints clamp.
@@ -72,6 +73,6 @@ weight = 0.5
 # id = "custom"
 # command = ["./scripts/lint-report"]
 # format = "json"
-# Regex format requires named path and line groups; rule/message are optional:
+# Regex format supports named path, line and message groups; rule is the check ID:
 # format = "regex"
 # warning_regex = '^(?P<path>[^:]+):(?P<line>\d+): (?P<message>.+)$'

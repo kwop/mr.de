@@ -145,8 +145,17 @@ pub fn diagnostics(command: &Command, text: &str, root: &Path) -> Result<Vec<Dia
     let mut out = Vec::new();
     match command.format.as_str() {
         "json" => {
-            out = serde_json::from_str(text)
-                .context("Expected a JSON array of {path, line, rule, message}")?
+            #[derive(Deserialize)]
+            #[serde(untagged)]
+            enum Input {
+                List(Vec<Diagnostic>),
+                Report { warnings: Vec<Diagnostic> },
+            }
+            out = match serde_json::from_str(text)
+                .context("Expected JSON diagnostics or a warnings array")?
+            {
+                Input::List(items) | Input::Report { warnings: items } => items,
+            };
         }
         "eslint" => {
             let files: Vec<serde_json::Value> = serde_json::from_str(text)?;

@@ -34,7 +34,12 @@ impl MrContext {
     pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.config.timeout_seconds)
     }
-    fn snapshot_paths(&self) -> Result<(PathBuf, PathBuf)> {
+    async fn snapshot_paths(&self, command: &config::Command) -> Result<(PathBuf, PathBuf)> {
+        ensure!(
+            command.approved,
+            "{} is proposed and needs local approval",
+            command.id
+        );
         let root = self
             .snapshots
             .as_ref()
@@ -45,7 +50,13 @@ impl MrContext {
                     .to_string()
             })?
             .path();
-        Ok((root.join("base"), root.join("head")))
+        // Each tool receives its own pair; a formatting lint cannot change Lizard's input.
+        let root = root.join(command.key());
+        let before = root.join("base");
+        let after = root.join("head");
+        mrde_git::risk::export(&self.worktree, &self.base_sha, &before).await?;
+        mrde_git::risk::export(&self.worktree, &self.head_sha, &after).await?;
+        Ok((before, after))
     }
 }
 #[async_trait]
@@ -164,16 +175,10 @@ async fn context_impl(
             Err(e) => ctx.coverage = Some(format!("Invalid coverage report: {e}")),
         }
     }
-    if ctx.config.complexity.approved || ctx.config.lint.iter().any(|c| c.approved) {
-        let snapshots = tempfile::tempdir()?;
-        let result = tokio::time::timeout(ctx.timeout(), async {
-            mrde_git::risk::export(worktree, &ctx.base_sha, &snapshots.path().join("base")).await?;
-            mrde_git::risk::export(worktree, head, &snapshots.path().join("head")).await
-        })
-        .await;
-        match result {
-            Ok(Ok(())) => ctx.snapshots = Some(snapshots),
-            other => ctx.snapshot_error = Some(format!("Snapshot preparation failed: {other:?}")),
+    match tempfile::tempdir() {
+        Ok(root) => ctx.snapshots = Some(root),
+        Err(error) => {
+            ctx.snapshot_error = Some(format!("Cannot create isolated command snapshots: {error}"))
         }
     }
     Ok(ctx)
