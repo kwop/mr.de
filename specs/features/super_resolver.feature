@@ -60,3 +60,14 @@ Feature: Resolve a GitLab request through a bounded repair session
     When I try to start Super Resolver
     Then I see that Super Resolver is not supported for this provider
     And no repair or source-branch push starts
+
+  @MRDE-RESOLVE-009 @regression @visual
+  Scenario: Close a thread while retaining its history
+    Given a resolver or questions thread is open
+    When I select Close thread
+    Then its worker and embedded terminals stop
+    And it moves to Closed threads with its worktree and history preserved
+    And late worker events cannot reopen it
+    And the thread remains closed after restarting the application
+    When I reopen the thread
+    Then no Claude session or automation starts until I explicitly request it

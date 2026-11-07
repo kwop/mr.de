@@ -66,6 +66,7 @@ pub fn new_thread(
     context: String,
 ) -> ResolverThread {
     ResolverThread {
+        closed_at: None,
         id: Uuid::new_v4().to_string(),
         instance,
         kind: ThreadKind::Resolver,
