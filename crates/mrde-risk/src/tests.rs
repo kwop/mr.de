@@ -68,6 +68,7 @@ fn fixture() -> MrContext {
         contents,
         contents_error: None,
         coverage: None,
+        coverage_root: "/workspace".into(),
         config,
         snapshots: None,
         snapshot_error: None,

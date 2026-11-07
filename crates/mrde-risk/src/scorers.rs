@@ -197,7 +197,7 @@ impl RiskScorer for TestGapScorer {
                 .collect()
         };
         if let Some(report) = &ctx.coverage {
-            let coverage = crate::reports::coverage(report, &ctx.worktree)?;
+            let coverage = crate::reports::coverage(report, &ctx.coverage_root)?;
             let mut considered = 0;
             let mut details = Vec::new();
             for file in &sources {

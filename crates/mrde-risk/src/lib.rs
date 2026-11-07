@@ -28,11 +28,18 @@ pub struct MrContext {
     pub contents: BTreeMap<String, (Option<String>, Option<String>)>,
     pub contents_error: Option<String>,
     pub coverage: Option<String>,
+    coverage_root: PathBuf,
     pub config: RiskConfig,
     snapshots: Option<tempfile::TempDir>,
     snapshot_error: Option<String>,
 }
 impl MrContext {
+    /// Associate an external coverage report with the checkout that produced its paths.
+    /// The Git snapshot may live elsewhere; this changes no measured code or files.
+    pub fn set_coverage(&mut self, report: Option<String>, source_root: &Path) {
+        self.coverage = report;
+        self.coverage_root = source_root.into();
+    }
     pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.config.timeout_seconds)
     }
@@ -119,6 +126,7 @@ async fn context_impl(
         contents: BTreeMap::new(),
         contents_error: None,
         coverage: None,
+        coverage_root: worktree.into(),
         config,
         snapshots: None,
         snapshot_error: None,
