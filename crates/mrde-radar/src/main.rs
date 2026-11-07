@@ -14,7 +14,7 @@ Usage: mrde-radar [OPTIONS]
   --config-dir PATH     Configuration root (default: ~/.config/mrde)
   --run-checks          Enable trusted complexity/lint commands via the check executor
   --prepare-tools       Detect and install supported tools (requires --run-checks)
-  --tool-cache PATH     Managed-tool cache (default: the MR.DE platform cache)
+  --tool-cache PATH     Tool/dependency cache (default: the MR.DE platform cache)
   --allow-command KEY   Approve an exact proposed fingerprint for this run; repeatable
   --format FORMAT      text (default), json or svg
   --json                Shortcut for --format json

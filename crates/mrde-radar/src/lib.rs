@@ -147,7 +147,7 @@ pub async fn scan(request: ScanRequest) -> Result<ScanReport> {
         mrde_risk::context(&snapshot.root, &snapshot.base, &snapshot.head, config).await?;
     context.set_coverage(coverage, &snapshot.source);
     if let Some(cache) = &request.tool_cache {
-        context.environment = mrde_risk::setup::environment(Some(cache));
+        context.set_tool_cache(cache);
     }
     let commands: Vec<_> = std::iter::once(&context.config.complexity)
         .chain(context.config.lint_commands())

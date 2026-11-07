@@ -696,12 +696,13 @@ impl RiskScorer for LintScorer {
             }
             let (before, after) = ctx.snapshot_paths(config).await?;
             let mut diagnostics = Vec::new();
-            for root in [&before, &after] {
+            for (root, sha) in [(&before, &ctx.base_sha), (&after, &ctx.head_sha)] {
                 if !ctx.prepared_checks.contains(&config.key()) {
-                    crate::setup::dependencies(
+                    crate::setup::prepared_dependencies(
+                        ctx,
                         config,
                         root,
-                        &ctx.environment,
+                        sha,
                         mrde_checks::runner::Network::Offline,
                     )
                     .await?;

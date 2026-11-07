@@ -93,8 +93,9 @@ async fn finish(
     env: &Env,
     config: &Config,
     detail: &MrDetail,
-    context: mrde_risk::MrContext,
+    mut context: mrde_risk::MrContext,
 ) -> anyhow::Result<Outcome> {
+    context.set_tool_cache(&env.cache);
     let report = mrde_risk::analyze(context).await;
     let store = env.store()?;
     store.save_risk(&config.namespace(), &detail.mr.id, &report)?;
@@ -185,13 +186,14 @@ pub(super) async fn baseline(
             )? {
                 return Ok::<_, anyhow::Error>(cached.profile);
             }
-            let context = mrde_risk::context(
+            let mut context = mrde_risk::context(
                 &path,
                 &historical.base_sha,
                 &historical.sha,
                 historical_config,
             )
             .await?;
+            context.set_tool_cache(&env.cache);
             let report = mrde_risk::analyze(context).await;
             env.store()?.save_risk(&config.namespace(), id, &report)?;
             Ok(report.profile)

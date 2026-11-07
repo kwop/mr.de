@@ -85,9 +85,18 @@ its package directory. The install root is included in the approval fingerprint.
 
 Bun runs ESLint directly and installs with `--frozen-lockfile --ignore-scripts`.
 See the [Bun install documentation](https://bun.sh/docs/pm/cli/install) and
-[lockfile formats](https://bun.sh/docs/pm/lockfile). Versions without a real `--offline`
-option (including Bun 1.3.3) require **Detect and install tools** for a new calculation;
-MR.DE reports this rather than using `--prefer-offline`, which can access the network.
+[lockfile formats](https://bun.sh/docs/pm/lockfile). After preparation, **Calculate again**
+reuses cached dependencies, including with Bun 1.3.3 which has no `--offline` option.
+This also works after restarting MR.DE. The cache stores only `node_modules` trees,
+including workspace links, under `risk-tools/bun-dependencies-v1` in the MR.DE cache.
+Each calculation receives an independent copy; a linter cannot change the cached tree.
+Bun runs ESLint with `--no-install` so the runtime cannot fetch a missing dependency.
+
+Cache entries are tied to the exact commit, approved command, Bun version and platform.
+A changed input requires preparation again. Missing or damaged entries show a setup action;
+MR.DE never substitutes `--prefer-offline` or silently downloads during a calculation.
+**Detect and install tools** rebuilds entries, and the cache directory may be removed to
+reclaim space. Each entry is limited to 2 GiB. An interrupted preparation is never reused.
 Bun itself must already be installed. No lockfile is converted and no lifecycle script runs.
 
 Tool preparation is a separate action from **Calculate again** and background refresh.

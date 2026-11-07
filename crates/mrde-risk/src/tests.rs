@@ -73,6 +73,7 @@ fn fixture() -> MrContext {
         snapshots: None,
         snapshot_error: None,
         environment: mrde_checks::environment::Environment::default(),
+        tool_cache: None,
         setup_messages: vec![],
         check_errors: Default::default(),
         detection_error: None,

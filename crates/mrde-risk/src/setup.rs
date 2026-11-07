@@ -18,6 +18,15 @@ const LIZARD: &str = "1.25.1";
 const RUFF: &str = "0.17.4";
 static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+// Unlock explicitly: another thread may have forked while the descriptor was open.
+// Waiting for every inherited copy to close can otherwise cause transient busy errors.
+pub(crate) struct FileLock(pub(crate) std::fs::File);
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 pub fn default_cache() -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
     #[cfg(target_os = "macos")]
@@ -51,7 +60,7 @@ pub fn environment(cache: Option<&Path>) -> Environment {
     }
     env
 }
-async fn execute(
+pub(crate) async fn execute(
     id: &str,
     argv: Vec<String>,
     root: &Path,
@@ -129,6 +138,7 @@ async fn python_tool(cache: &Path, name: &str, version: &str, env: &mut Environm
     // OS locks release on cancellation or process death; a crash cannot leave setup stuck.
     lock.try_lock()
         .context("This tool is already being installed. Retry after that operation finishes.")?;
+    let _file_lock = FileLock(lock);
     let _ = std::fs::remove_file(root.join("ready"));
     execute(
         "Create isolated radar environment",
@@ -276,7 +286,7 @@ pub(crate) async fn dependencies(
                             .split_whitespace()
                             .chain(help.stderr.split_whitespace())
                             .any(|word| word == "--offline"),
-                    "Installed Bun cannot restore dependencies offline. Use Detect and install tools to calculate with this version, or install a Bun version with --offline support."
+                    "Bun dependencies for this commit are not cached yet. Run Detect and install tools once; subsequent calculations can reuse the prepared dependencies offline."
                 );
                 argv.push("--offline".into());
             }
@@ -312,6 +322,40 @@ pub(crate) async fn dependencies(
         .context("Lint dependencies are unavailable. Use Detect and install tools to prepare the approved check")
 }
 
+/// Restore immutable prepared Bun dependencies into a fresh disposable snapshot.
+pub(crate) async fn prepared_dependencies(
+    ctx: &MrContext,
+    command: &Command,
+    root: &Path,
+    sha: &str,
+    network: Network,
+) -> Result<()> {
+    ensure!(
+        command.approved,
+        "{} is proposed and needs local approval",
+        command.id
+    );
+    if command.preparation != Some(Preparation::Bun) {
+        return dependencies(command, root, &ctx.environment, network).await;
+    }
+    let cache = crate::dependency_cache::BunCache::new(
+        ctx.tool_cache
+            .as_deref()
+            .context("Tool cache unavailable; configure the MR.DE cache directory")?,
+        command,
+        sha,
+        root,
+        &ctx.environment,
+    )
+    .await?;
+    if network == Network::Offline && cache.restore(root, &ctx.environment).await? {
+        return Ok(());
+    }
+    dependencies(command, root, &ctx.environment, network).await?;
+    // Publish before lint runs: a check must never poison the reusable dependency tree.
+    cache.store(root, &ctx.environment).await
+}
+
 /// Called only by an explicit setup action, never by background refresh or `analyze`.
 pub async fn prepare(ctx: &mut MrContext, cache: &Path) {
     let cache = if cache.is_absolute() {
@@ -327,7 +371,7 @@ pub async fn prepare(ctx: &mut MrContext, cache: &Path) {
         }
     };
     let cache = cache.as_path();
-    ctx.environment = environment(Some(cache));
+    ctx.set_tool_cache(cache);
     if let Err(error) = std::fs::create_dir_all(cache) {
         ctx.setup_messages
             .push(format!("Tool cache unavailable: {error}"));
@@ -377,8 +421,8 @@ pub async fn prepare(ctx: &mut MrContext, cache: &Path) {
                     .await?;
                 }
             }
-            for root in [&base, &head] {
-                dependencies(&command, root, &ctx.environment, Network::Setup).await?;
+            for (root, sha) in [(&base, &ctx.base_sha), (&head, &ctx.head_sha)] {
+                prepared_dependencies(ctx, &command, root, sha, Network::Setup).await?;
             }
             ctx.prepared_checks.insert(command.key());
             Ok(())
@@ -526,11 +570,7 @@ esac
         let error = dependencies(&command, root, &env, Network::Offline)
             .await
             .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("cannot restore dependencies offline")
-        );
+        assert!(error.to_string().contains("not cached yet"));
         assert_eq!(std::fs::read_to_string(&log).unwrap(), first);
         std::fs::write(&bun, script(true)).unwrap();
         dependencies(&command, root, &env, Network::Offline)
