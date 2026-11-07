@@ -62,11 +62,13 @@ fn fixture() -> MrContext {
         worktree: "/workspace".into(),
         base_sha: "a".repeat(40),
         head_sha: "b".repeat(40),
+        ticket_created_at: None,
+        measured_at: chrono::Utc::now(),
         files,
         stats,
         excluded: vec![],
         contents,
-        contents_error: None,
+        contents_errors: BTreeMap::new(),
         coverage: None,
         coverage_root: "/workspace".into(),
         config,
@@ -704,4 +706,79 @@ async fn bun_workspace_setup_uses_root_lockfile_and_keeps_the_changed_package_sc
             Some(config::Preparation::JavaScript)
         );
     }
+}
+
+#[tokio::test]
+async fn large_assets_do_not_disable_coupling_and_large_sources_report_partial_evidence() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.name", "Developer"]);
+    git(root, &["config", "user.email", "developer@example.com"]);
+    write(root, "src/lib.ts", "export const value = 1;\n");
+    write(root, "src/large.ts", "export const old = 1;\n");
+    write(root, "package.json", r#"{"dependencies":{}}"#);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "Base"]);
+    let base = git(root, &["rev-parse", "HEAD"]);
+    write(
+        root,
+        "src/lib.ts",
+        "import {value} from './shared';\nexport const result = value;\n",
+    );
+    write(
+        root,
+        "package.json",
+        r#"{"dependencies":{"library":"1.0.0"}}"#,
+    );
+    let large = "// long data line\n".repeat(70_000);
+    write(root, "fixtures/data.json", &large);
+    write(root, "README.md", &large);
+    write(root, "src/large.ts", &large);
+    write(root, "bun.lock", &large);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "Change"]);
+    let head = git(root, &["rev-parse", "HEAD"]);
+    let config = RiskConfig {
+        autodetect_lint: false,
+        ..Default::default()
+    };
+    let ctx = context(root, &base, &head, config).await.unwrap();
+    assert_eq!(ctx.contents_errors.len(), 1);
+    assert!(ctx.contents_errors.contains_key("src/large.ts"));
+    assert!(!ctx.contents.contains_key("README.md"));
+    assert!(ctx.excluded.contains(&"bun.lock".into()));
+    let raw = CouplingScorer.measure(&ctx).await.unwrap();
+    assert_eq!(raw.value, 2.);
+    assert!(raw.method.contains("Partial lower bound"));
+    assert!(raw.method.contains("src/large.ts"));
+    assert!(!raw.method.contains("README.md"));
+    assert!(raw.evidence.iter().any(|e| e.path == "package.json"));
+    assert!(raw.evidence.iter().any(|e| e.path == "src/lib.ts"));
+}
+
+#[tokio::test]
+async fn coupling_with_no_readable_inputs_remains_unknown() {
+    let mut ctx = fixture();
+    ctx.contents.clear();
+    ctx.contents_errors.insert(
+        "src/auth.rs".into(),
+        "File exceeds the 1 MiB content limit".into(),
+    );
+    assert!(
+        CouplingScorer
+            .measure(&ctx)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("No coupling inputs")
+    );
+}
+
+#[tokio::test]
+async fn ticket_age_scorer_needs_metadata_but_no_external_command() {
+    let mut ctx = fixture();
+    assert!(TicketAgeScorer.measure(&ctx).await.is_err());
+    ctx.ticket_created_at = Some(ctx.measured_at - chrono::Duration::days(180));
+    assert_eq!(TicketAgeScorer.measure(&ctx).await.unwrap().value, 180.);
 }

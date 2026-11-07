@@ -130,6 +130,10 @@ impl Default for RiskConfig {
                 Axis::Debt,
                 vec![[0., 0.], [2., 2.], [5., 5.], [15., 8.], [30., 10.]],
             ),
+            (
+                Axis::TicketAge,
+                vec![[0., 0.], [30., 0.], [90., 4.], [180., 8.], [365., 10.]],
+            ),
         ]
         .into_iter()
         .map(|(axis, curve)| (axis.id().into(), curve))
@@ -293,8 +297,8 @@ impl RiskConfig {
             "coverage_path must stay inside the repository"
         );
         ensure!(
-            self.normalization.len() == 8,
-            "Define only the eight known normalization axes"
+            self.normalization.len() == Axis::COUNT,
+            "Define only the known normalization axes"
         );
         for axis in Axis::ALL {
             validate_curve(
@@ -357,7 +361,7 @@ impl RiskConfig {
     pub fn fingerprint(&self) -> String {
         format!(
             // Bumped when scorers change meaning, so cached profiles are measured again.
-            "risk-v5:{:x}",
+            "risk-v6:{:x}",
             Sha256::digest(serde_json::to_vec(self).expect("serializable config"))
         )
     }

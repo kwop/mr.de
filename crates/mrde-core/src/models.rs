@@ -80,6 +80,11 @@ pub struct MergeRequest {
     pub sha: String,
     pub base_sha: String,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub merged_at: Option<DateTime<Utc>>,
+    /// Oldest primary ticket, independent of the merge request's creation date.
+    #[serde(default)]
+    pub ticket_created_at: Option<DateTime<Utc>>,
     pub labels: Vec<Label>,
     /// Labels of the linked tickets (related issues) not already on the MR. Teams often
     /// label tickets rather than merge requests.
@@ -162,6 +167,14 @@ pub fn primary_tickets<'a>(mr: &MergeRequest, issues: &'a [Issue]) -> Vec<&'a Is
     }
 }
 
+/// The oldest known primary ticket is the most likely to need its requirements rechecked.
+pub fn ticket_created_at(mr: &MergeRequest, issues: &[Issue]) -> Option<DateTime<Utc>> {
+    primary_tickets(mr, issues)
+        .into_iter()
+        .filter_map(|issue| issue.created_at)
+        .min()
+}
+
 impl MergeRequest {
     /// MR labels first, then ticket labels; used for display and priority.
     pub fn all_labels(&self) -> impl Iterator<Item = &Label> {
@@ -197,6 +210,8 @@ pub struct ChangedFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Issue {
+    #[serde(default)]
+    pub created_at: Option<DateTime<Utc>>,
     pub title: String,
     #[serde(default, deserialize_with = "null_to_empty")]
     pub description: String,
@@ -370,6 +385,8 @@ mod tests {
             base_sha: "b".into(),
             created_at: Utc::now(),
             labels: vec![],
+            merged_at: None,
+            ticket_created_at: None,
             ticket_labels: vec![],
             pipeline: None,
             approvals: None,
@@ -378,12 +395,28 @@ mod tests {
     }
     fn issue(project: &str, iid: u64, labels: &[&str]) -> Issue {
         Issue {
+            created_at: None,
             title: format!("{project}#{iid}"),
             description: String::new(),
             web_url: format!("https://gitlab.example.com/team/{project}/-/issues/{iid}"),
             labels: labels.iter().map(|l| (*l).into()).collect(),
             project_id: None,
         }
+    }
+
+    #[test]
+    fn ticket_age_uses_the_primary_issue_instead_of_mr_age_or_mentions() {
+        let request = mr("Implement web-app#12 and web-app#13", "Also see web-app#99");
+        let mut issues = vec![
+            issue("web-app", 12, &[]),
+            issue("web-app", 13, &[]),
+            issue("web-app", 99, &[]),
+        ];
+        issues[0].created_at = Some("2026-06-01T00:00:00Z".parse().unwrap());
+        issues[1].created_at = Some("2026-05-01T00:00:00Z".parse().unwrap());
+        issues[2].created_at = Some("2020-01-01T00:00:00Z".parse().unwrap());
+        assert_eq!(ticket_created_at(&request, &issues), issues[1].created_at);
+        assert_eq!(ticket_created_at(&request, &[]), None);
     }
 
     #[test]

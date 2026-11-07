@@ -161,6 +161,7 @@ async fn detail_lists_paged_files_the_merge_base_and_closing_issues() {
     let mut detail = pull(7, false);
     detail["closingIssuesReferences"] = json!({"nodes": [{
         "title": "Create recurring invoices", "body": "As an account manager…",
+        "createdAt": "2026-01-01T00:00:00Z",
         "url": "https://github.com/acme/platform/issues/3",
         "repository": {"databaseId": 42},
         "labels": {"nodes": [{"name": "billing", "color": "0e8a16"}]}
@@ -245,6 +246,10 @@ async fn detail_lists_paged_files_the_merge_base_and_closing_issues() {
     assert_eq!(detail.issues[0].project_id, Some(42));
     assert_eq!(detail.mr.ticket_labels[0].name, "billing");
     assert_eq!(primary_tickets(&detail.mr, &detail.issues).len(), 1);
+    assert_eq!(
+        detail.mr.ticket_created_at,
+        Some("2026-01-01T00:00:00Z".parse().unwrap())
+    );
 }
 
 #[tokio::test]

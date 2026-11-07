@@ -25,12 +25,14 @@ pub struct MrContext {
     pub worktree: PathBuf,
     pub base_sha: String,
     pub head_sha: String,
+    pub ticket_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub measured_at: chrono::DateTime<chrono::Utc>,
     pub stats: DiffStats,
     /// Changed paths no axis counts: generated, vendored, or matching `exclude`.
     pub excluded: Vec<String>,
     pub files: Vec<FileDiff>,
     pub contents: BTreeMap<String, (Option<String>, Option<String>)>,
-    pub contents_error: Option<String>,
+    pub contents_errors: BTreeMap<String, String>,
     pub coverage: Option<String>,
     coverage_root: PathBuf,
     pub config: RiskConfig,
@@ -132,6 +134,8 @@ async fn context_impl(
         worktree: worktree.into(),
         base_sha,
         head_sha: head.into(),
+        ticket_created_at: None,
+        measured_at: chrono::Utc::now(),
         stats: DiffStats {
             sha: head.into(),
             source: StatsSource::Git,
@@ -140,7 +144,7 @@ async fn context_impl(
         excluded,
         files: parsed,
         contents: BTreeMap::new(),
-        contents_error: None,
+        contents_errors: BTreeMap::new(),
         coverage: None,
         coverage_root: worktree.into(),
         config,
@@ -165,14 +169,24 @@ async fn context_impl(
             Err(error) => ctx.detection_error = Some(format!("Lint detection failed: {error:#}")),
         }
     }
-    if ctx.files.len() > 1000 {
-        ctx.contents_error =
-            Some("More than 1000 changed files; content analysis is unavailable".into());
-    } else {
-        let pending = ctx
-            .files
-            .iter()
-            .map(|f| async {
+    // Only source and dependency manifests need full contents. Large documentation,
+    // fixtures, and assets must not disable coupling for the rest of the change.
+    let needed: Vec<_> = ctx
+        .files
+        .iter()
+        .filter(|f| scorers::needs_contents(f.path()))
+        .collect();
+    for file in needed.iter().skip(1000) {
+        ctx.contents_errors.insert(
+            file.path().into(),
+            "Content analysis is limited to 1000 source files and manifests".into(),
+        );
+    }
+    let pending = needed
+        .into_iter()
+        .take(1000)
+        .map(|f| async {
+            let result = async {
                 let before = match &f.old_path {
                     Some(p) => mrde_git::show_file(worktree, &ctx.base_sha, p).await?,
                     None => None,
@@ -184,22 +198,25 @@ async fn context_impl(
                 ensure!(
                     before.as_ref().map_or(0, String::len) <= 1024 * 1024
                         && after.as_ref().map_or(0, String::len) <= 1024 * 1024,
-                    "File exceeds 1 MiB content limit: {}",
-                    f.path()
+                    "File exceeds the 1 MiB content limit"
                 );
-                Ok::<_, anyhow::Error>((f.path().to_string(), (before, after)))
-            })
-            .collect::<Vec<_>>();
-        let results = stream::iter(pending)
-            .buffer_unordered(8)
-            .collect::<Vec<_>>()
+                Ok::<_, anyhow::Error>((before, after))
+            }
             .await;
-        for result in results {
-            match result {
-                Ok((path, contents)) => {
-                    ctx.contents.insert(path, contents);
-                }
-                Err(e) => ctx.contents_error = Some(e.to_string()),
+            (f.path().to_string(), result)
+        })
+        .collect::<Vec<_>>();
+    let results = stream::iter(pending)
+        .buffer_unordered(8)
+        .collect::<Vec<_>>()
+        .await;
+    for (path, result) in results {
+        match result {
+            Ok(contents) => {
+                ctx.contents.insert(path, contents);
+            }
+            Err(error) => {
+                ctx.contents_errors.insert(path, error.to_string());
             }
         }
     }
@@ -250,6 +267,7 @@ async fn analyze_impl(ctx: MrContext) -> RiskReport {
         Box::new(CouplingScorer),
         Box::new(LintScorer),
         Box::new(DebtScorer),
+        Box::new(TicketAgeScorer),
     ];
     let pending = scorers
         .into_iter()

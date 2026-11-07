@@ -102,7 +102,7 @@ id = "risk.partial"
 title = "Risk radar with an unavailable axis"
 scenario = "focus:changes"
 contracts = ["MRDE-RISK-002", "MRDE-UI-004"]
-inspect = ["Eight labeled axes, blue profile, dashed median and visible n/a.", "Verdict, known-axis mean and sample counts remain readable."]
+inspect = ["Nine labeled axes, blue profile, dashed median and visible n/a.", "Verdict, known-axis mean and sample counts remain readable."]
 
 [[story]]
 id = "risk.evidence"

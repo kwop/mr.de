@@ -1,6 +1,6 @@
 //! Explainable measurements over commit contents, never the user's dirty working files.
 use crate::{MrContext, RiskScorer};
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use async_trait::async_trait;
 use mrde_core::{
     models::FileStat,
@@ -499,23 +499,38 @@ pub(crate) fn dependency(target: &str) -> Option<String> {
         _ => Some(target.into()),
     }
 }
+/// Only these files participate in dependency/import analysis (and inline Rust tests).
+pub(crate) fn needs_contents(path: &str) -> bool {
+    source(path)
+        || matches!(
+            path.rsplit('/').next(),
+            Some("Cargo.toml" | "package.json" | "pubspec.yaml" | "go.mod")
+        )
+}
 #[async_trait]
 impl RiskScorer for CouplingScorer {
     fn id(&self) -> Axis {
         Axis::Coupling
     }
     async fn measure(&self, ctx: &MrContext) -> Result<RawMetric> {
-        ensure!(
-            ctx.contents_error.is_none(),
-            "{}",
-            ctx.contents_error.as_deref().unwrap_or_default()
-        );
         let mut details = Vec::new();
-        for file in ctx.files.iter().filter(|f| !is_test(f.path())) {
-            let (before, after) = ctx
-                .contents
-                .get(file.path())
-                .context("Missing file contents")?;
+        let mut missing = Vec::new();
+        let mut measured = 0;
+        for file in ctx
+            .files
+            .iter()
+            .filter(|f| !is_test(f.path()) && needs_contents(f.path()))
+        {
+            let Some((before, after)) = ctx.contents.get(file.path()) else {
+                let reason = ctx
+                    .contents_errors
+                    .get(file.path())
+                    .map(String::as_str)
+                    .unwrap_or("Missing file contents");
+                missing.push(format!("{}: {reason}", file.path()));
+                continue;
+            };
+            measured += 1;
             let (before, after) = (
                 before.as_deref().unwrap_or_default(),
                 after.as_deref().unwrap_or_default(),
@@ -557,10 +572,23 @@ impl RiskScorer for CouplingScorer {
                 }));
             }
         }
+        ensure!(
+            measured > 0 || missing.is_empty(),
+            "No coupling inputs could be analyzed: {}",
+            missing.join("; ")
+        );
+        let mut method = "Added manifest dependencies + modules that existing product files import for the first time (standard library and self/super imports ignored); textual heuristic".to_string();
+        if !missing.is_empty() {
+            method.push_str(&format!(
+                ". Partial lower bound: {} file(s) not analyzed: {}",
+                missing.len(),
+                missing.join("; ")
+            ));
+        }
         Ok(metric(
             details.len() as f64,
             "edges",
-            "Added manifest dependencies + modules that existing product files import for the first time (standard library and self/super imports ignored); textual heuristic",
+            &method,
             true,
             details,
         ))
@@ -757,5 +785,17 @@ impl RiskScorer for LintScorer {
             false,
             details,
         ))
+    }
+}
+
+/// The ninth axis uses forge metadata already supplied by the caller; no network access.
+pub struct TicketAgeScorer;
+#[async_trait]
+impl RiskScorer for TicketAgeScorer {
+    fn id(&self) -> Axis {
+        Axis::TicketAge
+    }
+    async fn measure(&self, ctx: &MrContext) -> Result<RawMetric> {
+        mrde_core::risk::ticket_age(ctx.ticket_created_at, ctx.measured_at)
     }
 }

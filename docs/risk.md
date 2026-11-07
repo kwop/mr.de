@@ -25,7 +25,31 @@ The experimental tab keeps the existing Files, Statistics, and History tabs avai
   `debt 2`, `coupling 1`…) colored by the axis severity, and `not scored` on lockfiles and
   generated code. Click a file, a disktree tile, or an evidence file to open its findings,
   line owners from `git blame` at the MR head, and recent commits, those of this MR marked;
-  it opens under the row you clicked and loads once per commit.
+  it opens under the row you clicked and loads once per commit. Disktree clicks scroll to
+  the opened file, including files beyond the first 60 displayed rows.
+
+## Ticket age and cached medians
+
+The ninth axis, **Ticket age**, uses the creation date of the oldest primary linked issue,
+not the MR. At the default thresholds, 30 days scores 0, 90 days scores 4, 180 days scores 8,
+and 365 days scores 10. It contributes to the mean, verdict, and risk sorting. This is a
+heuristic prompt to revalidate the requirement, not a claim that an old ticket is obsolete.
+Override `normalization.ticket_age` in `risk.toml`. Missing dates remain n/a; standalone
+CLI scans have no forge issue metadata and therefore leave this axis unavailable.
+
+Opening an MR restores its saved team median from SQLite. **Update team median** checks the
+latest merged requests and reuses profiles with the same project, base/head commits and
+configuration. Only cache misses run local checks. The requested target tip is mapped to
+the actual Git merge base, so divergent branches do not repeatedly miss the cache. An
+unchanged median keeps its saved timestamp. Changed configuration invalidates the cache.
+Ticket age in historical samples is measured **at merge time**, not today. For an open MR,
+age is refreshed when a cached profile is restored, without rerunning technical checks.
+
+Large assets and documentation are not read as dependency manifests. Coupling still
+analyzes readable source files when another source exceeds the 1 MiB content limit; its
+method lists omitted files and explicitly labels the result a **partial lower bound**.
+If no relevant inputs can be analyzed, the axis remains n/a instead of reporting zero.
+Bun lockfiles are treated as generated dependency data, not handwritten source.
 
 ## Configuration
 
@@ -161,7 +185,7 @@ loads a locally measured report in preview mode only, without credentials.
 
 ```mermaid
 flowchart LR
-  WT[Local MR commits] --> S[Eight isolated scorers]
+  WT[Local MR commits] --> S[Nine isolated scorers]
   CFG[risk.toml] --> S
   S --> N[Piecewise normalization]
   N --> P[RiskProfile]

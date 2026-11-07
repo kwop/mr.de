@@ -36,11 +36,12 @@ const SEARCH_PAGES: usize = 20;
 /// Pull request files are listed 100 at a time, up to GitHub's limit of 3,000.
 const FILE_PAGES: usize = 30;
 
-const PULL_FIELDS: &str = "number title body url createdAt isDraft additions deletions
+const PULL_FIELDS: &str = "number title body url createdAt mergedAt isDraft additions deletions
     author { login }
     headRefOid baseRefOid
     repository { databaseId nameWithOwner sshUrl }
     labels(first: 30) { nodes { name color } }
+    ticketDates: closingIssuesReferences(first: 10) { nodes { createdAt } }
     latestOpinionatedReviews(first: 100) { nodes { state } }
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }";
 
@@ -107,12 +108,19 @@ struct GqlIssueRepository {
     database_id: u64,
 }
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GqlIssue {
+    created_at: Option<DateTime<Utc>>,
     title: String,
     body: Option<String>,
     url: String,
     repository: GqlIssueRepository,
     labels: Option<Nodes<GqlLabel>>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GqlTicketDate {
+    created_at: Option<DateTime<Utc>>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,6 +130,7 @@ struct GqlPull {
     body: Option<String>,
     url: String,
     created_at: DateTime<Utc>,
+    merged_at: Option<DateTime<Utc>>,
     is_draft: bool,
     additions: Option<u64>,
     deletions: Option<u64>,
@@ -134,6 +143,7 @@ struct GqlPull {
     commits: Option<Nodes<GqlCommitNode>>,
     #[serde(default)]
     closing_issues_references: Option<Nodes<GqlIssue>>,
+    ticket_dates: Option<Nodes<GqlTicketDate>>,
 }
 
 /// GitHub's combined check state, named like GitLab pipeline statuses.
@@ -160,12 +170,13 @@ impl GqlPull {
             .and_then(|commits| commits.items().last())
             .and_then(|node| node.commit.status_check_rollup)
             .and_then(|rollup| pipeline(&rollup.state));
-        let issues = self
+        let issues: Vec<Issue> = self
             .closing_issues_references
             .map(|issues| {
                 issues
                     .items()
                     .map(|issue| Issue {
+                        created_at: issue.created_at,
                         title: issue.title,
                         description: issue.body.unwrap_or_default(),
                         web_url: issue.url,
@@ -200,6 +211,8 @@ impl GqlPull {
                 .labels
                 .map(|labels| labels.items().map(Label::from).collect())
                 .unwrap_or_default(),
+            merged_at: self.merged_at,
+            ticket_created_at: None,
             ticket_labels: Vec::new(),
             pipeline,
             approvals,
@@ -207,6 +220,13 @@ impl GqlPull {
         };
         // Issues a pull request closes are its tickets.
         mr.ticket_labels = ticket_labels(&mr.labels, &issues);
+        mr.ticket_created_at = self
+            .ticket_dates
+            .into_iter()
+            .flat_map(Nodes::items)
+            .filter_map(|issue| issue.created_at)
+            .chain(issues.iter().filter_map(|issue| issue.created_at))
+            .min();
         (mr, issues, self.repository.ssh_url)
     }
 }
@@ -397,7 +417,7 @@ impl GitHub {
             .split_once('/')
             .context("Invalid GitHub repository name")?;
         let issues = if detail {
-            "closingIssuesReferences(first: 10) { nodes { title body url repository { databaseId } labels(first: 30) { nodes { name color } } } }"
+            "closingIssuesReferences(first: 10) { nodes { title body url createdAt repository { databaseId } labels(first: 30) { nodes { name color } } } }"
         } else {
             ""
         };

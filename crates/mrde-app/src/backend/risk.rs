@@ -36,16 +36,22 @@ pub(super) fn cached(
         return Ok(None);
     };
     let risk = config_for(env, config, &path)?;
-    Ok(env
-        .store()?
-        .risk(
-            &config.namespace(),
-            &detail.mr.id,
-            &detail.mr.sha,
-            &detail.mr.base_sha,
-            &risk.fingerprint(),
-        )?
-        .filter(|r| r.profile.base_sha == detail.mr.base_sha))
+    let mut report = env.store()?.risk(
+        &config.namespace(),
+        &detail.mr.id,
+        &detail.mr.sha,
+        &detail.mr.base_sha,
+        &risk.fingerprint(),
+    )?;
+    if let Some(report) = &mut report {
+        refresh_ticket_age(
+            &mut report.profile,
+            detail.mr.ticket_created_at,
+            chrono::Utc::now(),
+            &risk.normalization[Axis::TicketAge.id()],
+        );
+    }
+    Ok(report)
 }
 pub(super) fn baseline_cached(
     env: &Env,
@@ -96,6 +102,7 @@ async fn finish(
     mut context: mrde_risk::MrContext,
 ) -> anyhow::Result<Outcome> {
     context.set_tool_cache(&env.cache);
+    context.ticket_created_at = detail.mr.ticket_created_at;
     let report = mrde_risk::analyze(context).await;
     let store = env.store()?;
     store.save_risk(&config.namespace(), &detail.mr.id, &report)?;
@@ -177,15 +184,39 @@ pub(super) async fn baseline(
             let historical = env.forge.summary(id).await?;
             let mut historical_config = risk.clone();
             historical_config.coverage_path.clear();
-            if let Some(cached) = env.store()?.risk(
+            // The caller's base can be a target branch tip, while analysis stores the
+            // resolved merge base. Persist that mapping so repeated updates hit SQLite.
+            let lookup = format!(
+                "risk-history-base:{}:{}:{}:{}:{}:{}",
+                config.namespace(),
+                id.project,
+                id.iid,
+                historical.base_sha,
+                historical.sha,
+                historical_config.fingerprint()
+            );
+            let store = env.store()?;
+            let resolved: String = store
+                .cached(&lookup)?
+                .unwrap_or_else(|| historical.base_sha.clone());
+            if let Some(mut cached) = store.risk(
                 &config.namespace(),
                 id,
                 &historical.sha,
-                &historical.base_sha,
+                &resolved,
                 &historical_config.fingerprint(),
             )? {
+                let at = historical.merged_at.unwrap_or(cached.profile.computed_at);
+                refresh_ticket_age(
+                    &mut cached.profile,
+                    historical.merged_at.and(historical.ticket_created_at),
+                    at,
+                    &risk.normalization[Axis::TicketAge.id()],
+                );
+                tracing::debug!(iid = id.iid, "Reusing cached baseline risk profile");
                 return Ok::<_, anyhow::Error>(cached.profile);
             }
+            drop(store);
             let mut context = mrde_risk::context(
                 &path,
                 &historical.base_sha,
@@ -194,8 +225,13 @@ pub(super) async fn baseline(
             )
             .await?;
             context.set_tool_cache(&env.cache);
+            // Closed work is compared at merge time, not allowed to age indefinitely.
+            context.ticket_created_at = historical.merged_at.and(historical.ticket_created_at);
+            context.measured_at = historical.merged_at.unwrap_or(context.measured_at);
             let report = mrde_risk::analyze(context).await;
-            env.store()?.save_risk(&config.namespace(), id, &report)?;
+            let store = env.store()?;
+            store.save_risk(&config.namespace(), id, &report)?;
+            store.save_cached(&lookup, &report.profile.base_sha)?;
             Ok(report.profile)
         }
         .await;
@@ -208,6 +244,18 @@ pub(super) async fn baseline(
     baseline.warnings = warnings;
     if !risk.coverage_path.is_empty() {
         baseline.warnings.push("Historical test gaps use the file-ratio heuristic; current coverage reports do not describe historical commits.".into());
+    }
+    // Keep the original computation time when the same samples yield the same median.
+    if let Some(previous) =
+        env.store()?
+            .cached::<Baseline>(&baseline_key(config, detail.mr.id.project, &risk))?
+        && previous.medians == baseline.medians
+        && previous.samples == baseline.samples
+        && previous.requested == baseline.requested
+        && previous.merged_mrs == baseline.merged_mrs
+        && previous.warnings == baseline.warnings
+    {
+        baseline.computed_at = previous.computed_at;
     }
     env.store()?.save_cached(
         &baseline_key(config, detail.mr.id.project, &risk),
@@ -343,16 +391,34 @@ mod tests {
             &repository,
             &["remote", "add", "origin", origin.to_str().unwrap()],
         );
+        // Historical API metadata may contain a target tip that has diverged from
+        // the MR: analysis must cache by its resolved merge base, not miss forever.
+        let target = git(
+            &origin,
+            &[
+                "commit-tree",
+                &format!("{initial}^{{tree}}"),
+                "-p",
+                &initial,
+                "-m",
+                "Target moves",
+            ],
+        );
+        git(&origin, &["update-ref", "refs/heads/parallel", &target]);
+        git(&repository, &["fetch", "origin", "parallel"]);
         let detail = MrDetail {
             mr: mr(20, &untested, &head),
             files: vec![],
             issues: vec![],
             ssh_url: "git@example.invalid:team/project.git".into(),
         };
+        let mut historical_ticket = mr(10, &target, &tested);
+        historical_ticket.ticket_created_at = Some("2026-01-01T00:00:00Z".parse().unwrap());
+        historical_ticket.merged_at = Some("2026-06-30T00:00:00Z".parse().unwrap());
         let env = Env {
             forge: Arc::new(History(vec![
                 mr(11, &tested, &untested),
-                mr(10, &initial, &tested),
+                historical_ticket.clone(),
                 mr(12, &initial, &"f".repeat(40)),
             ])),
             cache,
@@ -397,6 +463,7 @@ mod tests {
             panic!("expected a baseline");
         };
         assert_eq!(baseline.merged_mrs, 3);
+        assert_eq!(baseline.medians[Axis::TicketAge.index()], Some(8.));
         assert_eq!(
             baseline.samples[Axis::DiffSize.index()],
             2,
@@ -411,6 +478,69 @@ mod tests {
         // The tested MR has no gap; the other adds 40 untested lines (2.6): median 1.3.
         let gap = baseline.medians[Axis::TestGap.index()].unwrap();
         assert!((gap - 1.3).abs() < 0.01, "{gap}");
+
+        let path = Worktrees::new(&env.cache, &config.namespace())
+            .existing(&detail)
+            .unwrap();
+        let risk_config = config_for(&env, &config, &path).unwrap();
+        let sample = || {
+            env.store()
+                .unwrap()
+                .risk(
+                    &config.namespace(),
+                    &MrId {
+                        project: 1,
+                        iid: 10,
+                    },
+                    &tested,
+                    &initial,
+                    &risk_config.fingerprint(),
+                )
+                .unwrap()
+                .unwrap()
+        };
+        let computed_at = sample().profile.computed_at;
+        let Outcome::RiskBaseline(_, repeated) =
+            self::baseline(&env, &config, &detail).await.unwrap()
+        else {
+            panic!("expected baseline")
+        };
+        assert_eq!(
+            sample().profile.computed_at,
+            computed_at,
+            "unchanged historical checks must not run again"
+        );
+        assert_eq!(repeated.computed_at, baseline.computed_at);
+        assert_eq!(repeated.medians, baseline.medians);
+        assert_eq!(
+            baseline_cached(&env, &config, &detail)
+                .unwrap()
+                .unwrap()
+                .medians,
+            baseline.medians,
+            "reopening SQLite restores the saved median"
+        );
+
+        let expanded = Env {
+            forge: Arc::new(History(vec![
+                mr(20, &untested, &head),
+                mr(11, &tested, &untested),
+                historical_ticket.clone(),
+            ])),
+            cache: env.cache.clone(),
+            settings: env.settings.clone(),
+        };
+        let Outcome::RiskBaseline(_, expanded) =
+            self::baseline(&expanded, &config, &detail).await.unwrap()
+        else {
+            panic!("expected baseline")
+        };
+        assert_eq!(expanded.samples[Axis::DiffSize.index()], 3);
+        assert_eq!(
+            sample().profile.computed_at,
+            computed_at,
+            "adding a merged MR reuses existing samples"
+        );
 
         let Outcome::RiskFile(_, _, file) = run(
             &env,

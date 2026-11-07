@@ -23,7 +23,7 @@ analysis.
   state, age and size, or by date, diff size, approval count or risk. Labels come with their GitLab colors, including those of
   the linked ticket when teams label tickets rather than merge requests. Search the queue
   (**⌘K**), filter it by labels from the sidebar, or open any merge request from its link.
-- **Changes and risk radar.** Eight configurable, explainable risk axes with the review depth
+- **Changes and risk radar.** Nine configurable, explainable risk axes with the review depth
   they call for, a per-axis team median, cached queue miniatures and risk sorting. Each axis
   shows its evidence; each changed file its findings, line owners and history. Axis
   discussions start Claude only on click.

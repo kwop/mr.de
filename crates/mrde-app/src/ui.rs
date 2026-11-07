@@ -87,6 +87,7 @@ pub struct Cockpit {
     risk_baseline: Option<(MrId, mrde_core::risk::Baseline)>,
     risk_axis: Option<mrde_core::risk::Axis>,
     risk_selected_file: Option<String>,
+    risk_scroll_pending: std::rc::Rc<std::cell::Cell<bool>>,
     /// The selected file opened under its findings in the axis evidence, not in the list.
     risk_file_in_evidence: bool,
     risk_file: Option<(MrId, String, mrde_core::risk::FileContext)>,
@@ -389,6 +390,7 @@ impl Cockpit {
             risk_baseline: None,
             risk_axis: None,
             risk_selected_file: None,
+            risk_scroll_pending: Default::default(),
             risk_file_in_evidence: false,
             risk_file: None,
             insights: None,
@@ -927,6 +929,7 @@ impl Cockpit {
     fn apply_detail(&mut self, detail: Box<MrDetail>, review: Option<(ReviewLevel, Review)>) {
         self.risk_axis = None;
         self.risk_selected_file = None;
+        self.risk_scroll_pending.set(false);
         self.risk_file = None;
         if self
             .risk
@@ -1560,7 +1563,7 @@ impl Cockpit {
                                 .as_ref()
                                 .filter(|r| r.head_sha == mr.sha)
                                 .map(|r| r.scores)
-                                .unwrap_or([None; 8]),
+                                .unwrap_or([None; mrde_core::risk::Axis::COUNT]),
                         ))
                         .child(
                             div()

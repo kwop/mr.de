@@ -369,17 +369,13 @@ impl Cockpit {
             canvas = canvas.child(
                 div()
                     .id(("disktree-tile", index))
-                    .when_some(
-                        tile.path
-                            .clone()
-                            .filter(|_| self.detail_tab == super::inbox::DetailTab::Changes),
-                        |tile, path| {
-                            tile.cursor_pointer()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.select_risk_file(path.clone(), cx)
-                                }))
-                        },
-                    )
+                    .debug_selector(move || format!("disktree-tile-{index}"))
+                    .when_some(tile.path.clone(), |tile, path| {
+                        tile.cursor_pointer()
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.jump_to_risk_file(path.clone(), window, cx)
+                            }))
+                    })
                     .absolute()
                     .left(relative(tile.left))
                     .top(relative(tile.top))

@@ -137,6 +137,8 @@ pub fn queue() -> Vec<MergeRequest> {
     let mut queue: Vec<MergeRequest> = SPECS
         .iter()
         .map(|spec| MergeRequest {
+            merged_at: None,
+            ticket_created_at: Some(chrono::Utc::now() - chrono::Duration::days(190)),
             draft: spec.iid == 238,
             risk: None,
             id: MrId {
@@ -298,6 +300,7 @@ pub fn detail(id: &MrId) -> Option<MrDetail> {
         mr,
         files,
         issues: vec![Issue {
+            created_at: None,
             title: "#1203 Create recurring invoices".into(),
             description: "As an account manager, I want to create a schedule of recurring invoices so that I do not enter each invoice by hand.\n\n**Criteria**: weekly or monthly, chosen days, end after a count or on a date.".into(),
             // Recent GitLab versions link tickets as work items.
@@ -764,6 +767,14 @@ pub fn risk(detail: &MrDetail) -> mrde_core::risk::RiskReport {
                 ),
             ],
         ),
+        measured(
+            Axis::TicketAge,
+            190.,
+            "days",
+            "Oldest primary ticket created 190 days before this review. Revalidate the requirements; age alone does not establish obsolescence.",
+            true,
+            vec![],
+        ),
     ];
     RiskReport {
         setup_messages: vec![],
@@ -796,8 +807,9 @@ pub fn baseline() -> mrde_core::risk::Baseline {
             Some(1.5),
             None,
             Some(1.2),
+            Some(2.3),
         ],
-        samples: [30, 30, 24, 30, 30, 30, 0, 30],
+        samples: [30, 30, 24, 30, 30, 30, 0, 30, 26],
         requested: 30,
         merged_mrs: 30,
         computed_at: chrono::Utc::now(),

@@ -813,6 +813,8 @@ mod tests {
             base_sha: "b".repeat(40),
             created_at: "2026-01-01T00:00:00Z".parse().unwrap(),
             labels: vec![],
+            merged_at: None,
+            ticket_created_at: None,
             ticket_labels: vec![],
             pipeline: None,
             approvals: None,

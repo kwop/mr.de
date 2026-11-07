@@ -50,6 +50,7 @@ struct RawMr {
     web_url: String,
     sha: Option<String>,
     created_at: chrono::DateTime<Utc>,
+    merged_at: Option<chrono::DateTime<Utc>>,
     labels: Vec<Label>,
     author: User,
     #[serde(default)]
@@ -88,6 +89,8 @@ impl RawMr {
                 .into(),
             created_at: self.created_at,
             labels: self.labels,
+            merged_at: self.merged_at,
+            ticket_created_at: None,
             ticket_labels: Vec::new(),
             pipeline: self
                 .head_pipeline
@@ -236,6 +239,7 @@ impl GitLab {
             self.colorize(project, &mut issue.labels).await;
         }
         mr.ticket_labels = ticket_labels(&mr.labels, primary_tickets(&mr, &issues));
+        mr.ticket_created_at = ticket_created_at(&mr, &issues);
         Ok((mr, issues))
     }
 
@@ -1200,7 +1204,7 @@ mod tests {
         Mock::given(path("/api/v4/projects/1/merge_requests/1/related_issues"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
                 "title":"Ticket","description":null,"web_url":"https://gitlab.example.com/front/-/issues/3",
-                "project_id":2,"labels":["P::0","Review::Dev"]
+                "project_id":2,"created_at":"2026-01-01T00:00:00Z","labels":["P::0","Review::Dev"]
             }])))
             .mount(&server)
             .await;
@@ -1223,6 +1227,10 @@ mod tests {
         let queue = forge.queue(&[MrRole::Reviewer]).await.unwrap();
         let summary = forge.summary(&queue[0].id).await.unwrap();
         assert_eq!(queue[0].labels, summary.labels);
+        assert_eq!(
+            summary.ticket_created_at,
+            Some("2026-01-01T00:00:00Z".parse().unwrap())
+        );
         assert_eq!(summary.labels[0].color.as_deref(), Some("#428BCA"));
         assert_eq!(summary.labels[0].text_color.as_deref(), Some("#FFFFFF"));
         assert_eq!(summary.labels[0].scope(), Some(("Review", "Dev")));
