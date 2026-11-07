@@ -23,15 +23,23 @@ or choose **New project**. Name it, select a provider, enter its URL, and click 
 Rename or edit the selected project in **Project settings**. Switching discards unsaved form
 edits and clears secret inputs; saving keeps their masked values visible.
 
-**GitLab** is operational. **GitHub** profiles can be created and saved, but their connector,
-pull requests, and connection testing are not implemented yet. They do not trigger requests.
-For GitLab, **Group / organization** optionally limits the queue to a group and its subgroups
-(e.g. `team/platform`); empty means all accessible groups. This is a queue filter, not a
-permission boundary: **Open MR…** can still open other repositories on the same instance.
+Both **GitLab** and **GitHub** are supported. For GitLab, **Group / organization** optionally
+limits the queue to a group and its subgroups (e.g. `team/platform`); empty means all
+accessible groups. For GitHub, it takes an owner (`acme`, a user or an organization) or one
+repository (`acme/platform`); empty means every repository you can see. This is a queue
+filter, not a permission boundary: **Open MR…** can still open other repositories on the same
+instance.
 
 **Test connection** checks authentication and access to the selected group without saving.
 **Save** writes settings without an HTTP request. Both show progress and errors. A GitLab
 personal access token typically needs `api` scope; SSH access for Git is independent.
+
+For GitHub, enter `https://github.com` or your GitHub Enterprise Server address (its API is
+under `/api/v3` and `/api/graphql`). A classic token needs the `repo` scope (`public_repo` for
+public repositories only). A fine-grained token needs read access to **Pull requests**,
+**Contents**, **Issues**, **Commit statuses**, and **Checks**, plus write access to **Pull
+requests** to approve. Cloudflare Access fields apply to GitLab only and are hidden for
+GitHub.
 Cloudflare Access service-token fields are optional. A blank secret keeps the value saved
 for **this project**. **Remove saved Cloudflare credentials** explicitly clears that pair.
 Tokens stay in Keychain, never TOML or SQLite; two projects on the same host do not share them.
@@ -121,6 +129,26 @@ Label colors come from GitLab. The merge request list returns them directly; the
 and related-issue endpoints return names only, so mr.de colors them from the project's labels
 (including parent groups), cached for ten minutes per project. A scoped label such as
 `Review::Dev` shows two adjoining segments: the scope in the label color, the value on white.
+
+## GitHub pull requests
+
+A GitHub project lists open, non-draft pull requests with the same roles: **Reviewer** covers
+pending review requests (yours or your team's) and pull requests you have already reviewed,
+**Assignee** and **Author** are what they say. One GraphQL search per role returns each pull
+request with its labels and colors, latest reviews, check status, and size, so a refresh costs
+a few requests whatever the number of pull requests.
+
+- **Pipeline**: the combined status of checks and commit statuses on the head commit
+  (success, failed, running, pending).
+- **Approvals**: reviewers whose latest decisive review approves the pull request.
+- **Ticket**: the issues the pull request closes (`Fixes #3` or linked manually), with their
+  labels.
+- **Diff base**: the merge base of the two branches, as GitLab reports it, so analyses compare
+  only the pull request's changes.
+- **Approve** submits an approving review bound to the reviewed commit, and refuses if the pull
+  request has a newer head commit.
+- Worktrees fetch `refs/pull/<number>/head` from the target repository, which also covers
+  forks. **Open MR…** accepts pull request links and `owner/repo#123`.
 
 ## Search, label filters, and opening any merge request
 
