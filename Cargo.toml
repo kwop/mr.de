@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+exclude = ["vendor/gpui-component"]
+default-members = ["crates/mrde-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "process", "time", "sync", "macros", "io-util"] }
+tracing = "0.1"
+url = { version = "2", features = ["serde"] }
+mrde-core = { path = "crates/mrde-core" }
+mrde-forge = { path = "crates/mrde-forge" }
+mrde-git = { path = "crates/mrde-git" }
+mrde-insights = { path = "crates/mrde-insights" }
+mrde-claude = { path = "crates/mrde-claude" }
+mrde-checks = { path = "crates/mrde-checks" }
+mrde-store = { path = "crates/mrde-store" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.dev]
+debug = 1
+
+# GPUI layout, text shaping, and Markdown rendering are unusably slow unoptimized.
+# Dependencies are built optimized once; workspace crates keep fast debug builds.
+[profile.dev.package."*"]
+opt-level = 3
+debug = 0
+
+# Pinned upstream 0.5.0 plus a small opt-in Markdown image-click callback.
+[patch.crates-io]
+gpui-component = { path = "vendor/gpui-component" }

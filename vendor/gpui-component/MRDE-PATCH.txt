@@ -1,0 +1,28 @@
+Source: gpui-component 0.5.0 from crates.io, Apache-2.0 (LICENSE-APACHE).
+Only src/text/node.rs and src/text/text_view.rs differ from upstream.
+
+MR.DE adds TextView::on_image_click, an opt-in callback receiving an image URI,
+its title/alt text, Window and App. It is installed at render time, so cached
+parses and background reparses use the current callback. Image links keep their
+upstream behavior when the callback is absent; when present, the callback takes
+precedence. No Markdown splitting or global URL interception is involved.
+
+A debug selector identifies rendered images in native interaction tests.
+Regression coverage lives in mrde-app's UI tests. Remove this local patch once
+a compatible upstream release exposes an image-click callback.
+
+List items (src/text/node.rs, render_list_item): the item text container is
+`div().flex_1().min_w_0().overflow_hidden()` instead of `div().overflow_hidden()`.
+Upstream, `overflow: hidden` gives the text column an automatic minimum width of 0 and
+no flex growth, so list item text collapsed to zero width and lists rendered as empty
+bullets. Verified with `MRDE_SCENARIO=detail:description` screenshots.
+
+Tables (src/text/node.rs, render_table): cells use flex-basis 0 with a flex-grow of
+sqrt(text length) and wrap their text, instead of `w(relative(len))` plus `truncate()`.
+Upstream clipped every long cell on one line (GPUI 0.2.2 also paints truncation from a
+stale measurement). Verified on real MR descriptions with long table cells.
+
+Root spacing (src/text/node.rs, render_block for Node::Root): each root block receives
+`is_last` for its own position. Upstream passed `is_last: true` to every block of a
+non-scrollable TextView, so paragraphs, lists, and tables lost their bottom gap and
+headings touched the preceding text.

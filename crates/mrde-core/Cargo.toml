@@ -1,0 +1,19 @@
+[package]
+name = "mrde-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+toml = "0.8"

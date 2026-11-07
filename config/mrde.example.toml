@@ -1,0 +1,12 @@
+gitlab_url = "https://gitlab.example.com"
+refresh_seconds = 120
+claude_path = "claude"
+# Roles: "reviewer", "assignee", "author". Sort: "priority", "newest", "oldest", "smallest".
+mr_roles = ["reviewer", "assignee"]
+mr_sort = "priority"
+# Optional specification folder for the compliance check; leave empty to disable it.
+spec_path = ""
+# Optional command run in the base and MR worktrees by the visual comparison. It must write
+# PNG files to $MRDE_SCREENSHOTS_DIR ($MRDE_SIDE is "before" or "after"). Empty disables it.
+visual_command = ""
+# Secrets are entered in Settings and stored in macOS Keychain.

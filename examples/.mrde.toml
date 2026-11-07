@@ -1,0 +1,10 @@
+# Phase-two schema only: mr.de does not execute these checks yet.
+[[checks]]
+id = "rust-tests"
+command = ["cargo", "test", "--workspace"]
+approval = "proposed"
+
+[[checks]]
+id = "rust-lint"
+command = ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]
+approval = "proposed"

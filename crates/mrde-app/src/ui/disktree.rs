@@ -1,0 +1,390 @@
+//! Center-panel "disktree": a treemap of the most changed code areas.
+//!
+//! Scrolling re-renders the whole view on every frame, so the statistics, layout, and
+//! labels are computed once per MR commit and statistics source, then only drawn.
+use super::Cockpit;
+use crate::theme::*;
+use gpui::{prelude::*, *};
+use gpui_component::tooltip::Tooltip;
+use gpui_component::{Sizable, button::*};
+use mrde_core::{
+    insights::{FileHistory, Level},
+    models::*,
+    stats::{gitlab_stats, treemap},
+};
+use std::rc::Rc;
+
+/// Width-to-height ratio used for layout; the container keeps a fixed height.
+const ASPECT: f64 = 3.;
+const HEIGHT: f32 = 220.;
+/// Beyond this, each zone's smaller files share a tile: readable and cheap to draw.
+const MAX_TILES: usize = 120;
+const ZONE_COLORS: [u32; 8] = [
+    0x3f6ea6, 0x4c8c5c, 0xa6763c, 0x8657a6, 0x3c9494, 0xa64e5e, 0x7c8a3c, 0x5c68a6,
+];
+
+pub(super) fn zone_color(index: usize) -> u32 {
+    ZONE_COLORS[index % ZONE_COLORS.len()]
+}
+
+#[derive(Clone, PartialEq)]
+struct Key {
+    id: MrId,
+    sha: String,
+    exact: bool,
+    files: usize,
+    risk: bool,
+}
+
+fn risk_color(file: Option<&FileHistory>) -> u32 {
+    match file {
+        Some(f) if f.new_file => 0x3f6ea6,
+        Some(f) => match f.risk {
+            Level::High => 0xb5534f,
+            Level::Medium => 0xa6803a,
+            Level::Low => 0x4c7c5c,
+        },
+        None => 0x555a63,
+    }
+}
+
+struct TileView {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+    color: u32,
+    label: Option<SharedString>,
+    tooltip: SharedString,
+}
+
+struct Model {
+    summary: SharedString,
+    tiles: Vec<TileView>,
+    legend: Vec<(u32, SharedString)>,
+}
+
+pub(super) struct Cached {
+    key: Key,
+    files: Rc<Vec<FileStat>>,
+    model: Option<Rc<Model>>,
+}
+
+fn build(stats: &DiffStats, history: Option<&[FileHistory]>) -> Option<Model> {
+    if stats.files.is_empty() {
+        return None;
+    }
+    let added: u64 = stats.files.iter().map(|f| f.added).sum();
+    let removed: u64 = stats.files.iter().map(|f| f.removed).sum();
+    let map = treemap(&stats.files, ASPECT, 1., MAX_TILES);
+    let tiles = map
+        .tiles
+        .iter()
+        .map(|tile| {
+            let r = tile.rect;
+            let (label, tooltip) = match tile.file {
+                Some(index) => {
+                    let file = &stats.files[index];
+                    (
+                        file.path
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&file.path)
+                            .to_string(),
+                        format!("{}\n+{} −{}", file.path, file.added, file.removed),
+                    )
+                }
+                None => (
+                    format!("+{} files", tile.files),
+                    format!(
+                        "{} smaller files in {}\n{} lines changed",
+                        tile.files, map.zones[tile.zone].name, tile.changed
+                    ),
+                ),
+            };
+            let show_label = r.w / ASPECT > 0.07 && r.h > 0.12;
+            let color = match (history, tile.file) {
+                (Some(history), Some(index)) => {
+                    risk_color(history.iter().find(|h| h.path == stats.files[index].path))
+                }
+                (Some(_), None) => risk_color(None),
+                (None, _) => zone_color(tile.zone),
+            };
+            TileView {
+                left: (r.x / ASPECT) as f32,
+                top: r.y as f32,
+                width: (r.w / ASPECT) as f32,
+                height: r.h as f32,
+                color,
+                label: show_label.then(|| label.into()),
+                tooltip: tooltip.into(),
+            }
+        })
+        .collect();
+    let legend = match history {
+        Some(_) => vec![
+            (
+                risk_color(Some(&risk_sample(Level::High, false))),
+                "High risk: frequent changes and fixes".into(),
+            ),
+            (
+                risk_color(Some(&risk_sample(Level::Medium, false))),
+                "Medium".into(),
+            ),
+            (
+                risk_color(Some(&risk_sample(Level::Low, false))),
+                "Low".into(),
+            ),
+            (
+                risk_color(Some(&risk_sample(Level::Low, true))),
+                "New file".into(),
+            ),
+            (risk_color(None), "No history".into()),
+        ],
+        None => map
+            .zones
+            .iter()
+            .enumerate()
+            .take(10)
+            .map(|(index, zone)| {
+                (
+                    zone_color(index),
+                    format!("{} · {}", short_zone(&zone.name), zone.changed).into(),
+                )
+            })
+            .collect(),
+    };
+    Some(Model {
+        summary: format!(
+            "{} files · +{added} −{removed} · {}",
+            stats.files.len(),
+            match stats.source {
+                StatsSource::Git => "exact (git)",
+                StatsSource::GitLab => "estimate (GitLab diff)",
+            }
+        )
+        .into(),
+        tiles,
+        legend,
+    })
+}
+
+fn risk_sample(risk: Level, new_file: bool) -> FileHistory {
+    FileHistory {
+        path: String::new(),
+        commits: 0,
+        fixes: 0,
+        authors: 0,
+        last_fix: None,
+        risk,
+        new_file,
+    }
+}
+
+/// `…/application/usecases` for deep zones: the legend stays short.
+fn short_zone(name: &str) -> String {
+    let parts: Vec<&str> = name.split('/').collect();
+    if parts.len() > 2 {
+        format!("…/{}", parts[parts.len() - 2..].join("/"))
+    } else {
+        name.to_string()
+    }
+}
+
+impl Cockpit {
+    fn exact_stats(&self, detail: &MrDetail) -> Option<&DiffStats> {
+        self.stats
+            .as_ref()
+            .filter(|(id, stats)| *id == detail.mr.id && stats.sha == detail.mr.sha)
+            .map(|(_, stats)| stats)
+    }
+
+    /// Per-file line counts: exact when computed, otherwise from the files GitLab did not
+    /// truncate. Shares the disktree memo, so the Files tab never rescans diffs per frame.
+    pub(super) fn file_stats(&self, detail: &MrDetail) -> Rc<Vec<FileStat>> {
+        self.disktree_cached(detail).0
+    }
+
+    fn disktree_model(&self, detail: &MrDetail) -> Option<Rc<Model>> {
+        self.disktree_cached(detail).1
+    }
+
+    fn disktree_cached(&self, detail: &MrDetail) -> (Rc<Vec<FileStat>>, Option<Rc<Model>>) {
+        let exact = self.exact_stats(detail);
+        let key = Key {
+            id: detail.mr.id.clone(),
+            sha: detail.mr.sha.clone(),
+            exact: exact.is_some(),
+            files: exact.map_or(detail.files.len(), |s| s.files.len()),
+            risk: self.risk_colors && self.current_insights().is_some(),
+        };
+        let history = self
+            .current_insights()
+            .filter(|_| key.risk)
+            .map(|insights| insights.history.clone());
+        let mut cache = self.disktree_cache.borrow_mut();
+        if let Some(cached) = cache.as_ref().filter(|c| c.key == key) {
+            return (cached.files.clone(), cached.model.clone());
+        }
+        let files = Rc::new(match exact {
+            Some(stats) => stats.files.clone(),
+            None => detail
+                .files
+                .iter()
+                .filter(|f| !f.too_large && !f.collapsed)
+                .map(mrde_core::stats::file_stat)
+                .collect(),
+        });
+        let model = match exact {
+            Some(stats) => build(stats, history.as_deref()),
+            None => gitlab_stats(&detail.files).and_then(|files| {
+                build(
+                    &DiffStats {
+                        sha: detail.mr.sha.clone(),
+                        source: StatsSource::GitLab,
+                        files,
+                    },
+                    history.as_deref(),
+                )
+            }),
+        }
+        .map(Rc::new);
+        *cache = Some(Cached {
+            key,
+            files: files.clone(),
+            model: model.clone(),
+        });
+        (files, model)
+    }
+
+    pub(super) fn disktree_view(&self, detail: &MrDetail, cx: &mut Context<Self>) -> AnyElement {
+        let model = self.disktree_model(detail);
+        let analyzed = self.current_insights().is_some();
+        let mut toggle = div()
+            .flex()
+            .gap_1()
+            .p(px(2.))
+            .rounded(px(6.))
+            .bg(rgb(FIELD));
+        for (risk, label) in [(false, "Zones"), (true, "Risk")] {
+            let selected = self.risk_colors == risk;
+            toggle = toggle.child(
+                div()
+                    .debug_selector(move || format!("disktree-{}", label.to_lowercase()))
+                    .child(
+                        Button::new(SharedString::from(format!("disktree-{label}")))
+                            .xsmall()
+                            .ghost()
+                            .label(label)
+                            .when(selected, |b| b.bg(rgb(SELECTED)).text_color(rgb(HEADING)))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.risk_colors = risk;
+                                cx.notify();
+                            })),
+                    ),
+            );
+        }
+        let mut header = div().flex().items_center().justify_between().gap_3().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .text_color(rgb(HEADING))
+                        .child("Disktree"),
+                )
+                .when(analyzed, |row| row.child(toggle)),
+        );
+        if let Some(model) = &model {
+            header = header.child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(rgb(SUBTLE))
+                    .child(model.summary.clone()),
+            );
+        }
+        let zone = div()
+            .debug_selector(|| "disktree".into())
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(header);
+        let Some(model) = model else {
+            return zone
+                .child(
+                    div()
+                        .h(px(64.))
+                        .rounded(px(7.))
+                        .border_1()
+                        .border_color(rgb(LINE))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .px_4()
+                        .text_size(px(12.))
+                        .text_color(rgb(MUTED))
+                        .child(if detail.files.is_empty() && self.exact_stats(detail).is_none() {
+                            "No changed files."
+                        } else {
+                            "GitLab truncated some diffs. Click Compute statistics to map the changes."
+                        }),
+                )
+                .into_any_element();
+        };
+        let mut canvas = div()
+            .debug_selector(|| "disktree-map".into())
+            .relative()
+            .w_full()
+            .h(px(HEIGHT))
+            .rounded(px(7.))
+            .overflow_hidden()
+            .bg(rgb(FIELD));
+        for (index, tile) in model.tiles.iter().enumerate() {
+            let tooltip = tile.tooltip.clone();
+            canvas = canvas.child(
+                div()
+                    .id(("disktree-tile", index))
+                    .absolute()
+                    .left(relative(tile.left))
+                    .top(relative(tile.top))
+                    .w(relative(tile.width))
+                    .h(relative(tile.height))
+                    .p(px(1.))
+                    .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+                    .child(
+                        div()
+                            .size_full()
+                            .rounded(px(2.))
+                            .bg(rgb(tile.color))
+                            .overflow_hidden()
+                            .px_1()
+                            .text_size(px(11.))
+                            .line_height(px(15.))
+                            .text_color(rgb(HEADING))
+                            .when_some(tile.label.clone(), |d, label| {
+                                d.child(div().one_line().child(crate::ellipsis::ellipsis(label)))
+                            }),
+                    ),
+            );
+        }
+        let legend =
+            div()
+                .flex()
+                .flex_wrap()
+                .gap_x_3()
+                .gap_y_1()
+                .children(model.legend.iter().map(|(color, label)| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .text_size(px(11.))
+                        .text_color(rgb(MUTED))
+                        .child(div().size(px(8.)).rounded(px(2.)).bg(rgb(*color)))
+                        .child(label.clone())
+                }));
+        zone.child(canvas).child(legend).into_any_element()
+    }
+}

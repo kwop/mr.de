@@ -1,0 +1,17 @@
+[package]
+name = "mrde-store"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+mrde-core.workspace = true
+rusqlite = { version = "0.32", features = ["bundled"] }
+keyring = { version = "3.6", features = ["apple-native"] }

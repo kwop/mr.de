@@ -1,0 +1,41 @@
+[package]
+name = "mrde"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+mrde-core.workspace = true
+mrde-forge.workspace = true
+mrde-git.workspace = true
+mrde-insights.workspace = true
+mrde-claude.workspace = true
+mrde-store.workspace = true
+gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
+gpui-component = "=0.5.0"
+gpui-component-assets = "=0.5.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "0.8"
+markdown = "=1.0.0"
+mermaid-rs-renderer = { version = "=0.3.1", default-features = false }
+futures-util = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "=0.24.0"
+core-foundation = "=0.10.0"
+png = "0.18"
+
+[dev-dependencies]
+gpui = { version = "=0.2.2", features = ["test-support", "runtime_shaders"] }
+wiremock = "0.6"
+tempfile = "3"
