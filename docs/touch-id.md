@@ -52,3 +52,12 @@ interactive verification on the user's Mac.
 Apple references: [Keychain APIs and implementations](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains),
 [Touch ID access to Keychain items](https://developer.apple.com/documentation/localauthentication/accessing-keychain-items-with-face-id-or-touch-id),
 and [restricted entitlements for command-line tools](https://developer.apple.com/forums/thread/724013).
+
+## Terminal companion
+
+The package includes `Contents/Helpers/mrde-tui.app`, signed with the same application
+identity and Keychain access group and carrying its own provisioning profile. Launch it
+through `mr.de.app/Contents/MacOS/mrde-tui`. The nested application structure is required:
+a loose executable with these restricted entitlements can pass signature verification but
+be killed by macOS at launch. Packaging verifies both signatures and runs a demo export;
+it does not read real credentials during this check.

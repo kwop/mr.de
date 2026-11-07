@@ -29,7 +29,10 @@ For credentials saved by the provisioned Touch ID application, use its signed co
 ```
 
 `scripts/package-macos.py` packages and signs both executables with the same entitlement
-and identity. An ordinary `cargo run` binary uses the legacy Keychain backend and cannot
+and identity. The terminal lives in `Contents/Helpers/mrde-tui.app`, with its own copy of
+the provisioning profile; the command above is a symlink to that executable. A loose helper
+with restricted entitlements is rejected by macOS even when `codesign --verify` succeeds.
+Packaging runs a synthetic terminal export to verify actual execution. An ordinary `cargo run` binary uses the legacy Keychain backend and cannot
 read the protected Touch ID item. No credential is copied into a file or environment
 variable. Live protected-keychain use remains a manual verification; automated tests use
 injected settings and executors.

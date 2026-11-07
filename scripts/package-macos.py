@@ -76,14 +76,33 @@ def main():
         rights.write_bytes(plistlib.dumps(entitlements))
         binary = root / "target" / ("release" if args.release else "debug") / "mrde"
         shutil.copy2(binary, app / "Contents/MacOS/mrde")
-        terminal = app / "Contents/MacOS/mrde-tui"
-        shutil.copy2(binary.with_name("mrde-tui"), terminal)
+        # Restricted Keychain entitlements need a profile for the helper's own bundle.
+        # A loose signed executable verifies successfully but macOS kills it at launch.
+        terminal_app = app / "Contents/Helpers/mrde-tui.app"
+        terminal_contents = terminal_app / "Contents"
+        (terminal_contents / "MacOS").mkdir(parents=True)
+        (terminal_contents / "Info.plist").write_bytes(plistlib.dumps({
+            "CFBundleIdentifier": BUNDLE_ID,
+            "CFBundleExecutable": "mrde-tui",
+            "CFBundlePackageType": "APPL",
+            "CFBundleName": "mr.de Terminal",
+            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleVersion": "1",
+            "LSUIElement": True,
+        }))
+        shutil.copy2(profile, terminal_contents / "embedded.provisionprofile")
+        shutil.copy2(binary.with_name("mrde-tui"), terminal_contents / "MacOS/mrde-tui")
         run(["codesign", "--force", "--sign", identity, "--identifier", BUNDLE_ID,
-             "--entitlements", str(rights), str(terminal)])
-        run(["codesign", "--verify", "--strict", str(terminal)])
+             "--entitlements", str(rights), str(terminal_app)])
+        run(["codesign", "--verify", "--strict", str(terminal_app)])
+        terminal = app / "Contents/MacOS/mrde-tui"
+        terminal.symlink_to("../Helpers/mrde-tui.app/Contents/MacOS/mrde-tui")
         run(["codesign", "--force", "--sign", identity, "--identifier", BUNDLE_ID,
              "--entitlements", str(rights), str(app)])
-    run(["codesign", "--verify", "--strict", "--verbose=2", str(app)])
+        # Exercise execution, not just codesign: this never reads saved credentials.
+        run([str(terminal), "--demo", "--screen", "radar", "--snapshot",
+             str(directory / "terminal-smoke.svg")])
+    run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)])
     final = run(["codesign", "-d", "--entitlements", ":-", str(app)], capture_output=True)
     validate_entitlements(plistlib.loads(final.stdout), args.team)
     print(f"Signed app ready: {app}\nLaunch this app, then Save your GitLab settings once to enable Touch ID.")
