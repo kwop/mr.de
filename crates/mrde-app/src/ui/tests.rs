@@ -180,6 +180,13 @@ impl Executor for FakeExecutor {
                     },
                 ))
             }
+            Action::SetupRiskTools(detail) => {
+                actions.push("risk-setup".into());
+                Ok(Outcome::Risk(
+                    detail.mr.id.clone(),
+                    Box::new(crate::demo::risk(&detail)),
+                ))
+            }
             Action::Risk(detail) | Action::ApproveRiskCommand(detail, _) => {
                 actions.push("risk".into());
                 Ok(Outcome::Risk(

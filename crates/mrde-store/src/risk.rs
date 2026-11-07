@@ -29,6 +29,7 @@ mod tests {
         let store = Store::open(Path::new(":memory:")).unwrap();
         let id = MrId { project: 1, iid: 2 };
         let report = RiskReport {
+            setup_messages: vec![],
             profile: RiskProfile {
                 axes: std::array::from_fn(|i| AxisScore::unavailable(Axis::ALL[i], "fixture")),
                 computed_at: "2026-01-01T00:00:00Z".parse().unwrap(),

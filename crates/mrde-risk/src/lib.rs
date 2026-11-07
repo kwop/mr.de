@@ -1,7 +1,9 @@
 //! Local risk analysis; no network clients and no implicit Git fetches.
 pub mod config;
+pub mod detect;
 mod reports;
 pub mod scorers;
+pub mod setup;
 use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
 use config::RiskConfig;
@@ -32,6 +34,11 @@ pub struct MrContext {
     pub config: RiskConfig,
     snapshots: Option<tempfile::TempDir>,
     snapshot_error: Option<String>,
+    pub environment: mrde_checks::environment::Environment,
+    pub setup_messages: Vec<String>,
+    pub check_errors: BTreeMap<String, String>,
+    detection_error: Option<String>,
+    prepared_checks: std::collections::BTreeSet<String>,
 }
 impl MrContext {
     /// Associate an external coverage report with the checkout that produced its paths.
@@ -130,7 +137,24 @@ async fn context_impl(
         config,
         snapshots: None,
         snapshot_error: None,
+        environment: setup::environment(None),
+        setup_messages: vec![],
+        check_errors: BTreeMap::new(),
+        detection_error: None,
+        prepared_checks: Default::default(),
     };
+    if ctx.config.autodetect_lint && ctx.config.lint.is_empty() {
+        let changed: Vec<_> = ctx.files.iter().map(|f| f.path().to_string()).collect();
+        match detect::lint_commands(worktree, head, &changed).await {
+            Ok(mut commands) => {
+                for command in &mut commands {
+                    command.approved = ctx.config.approvals.contains(&command.key());
+                }
+                ctx.config.detected_lint = commands;
+            }
+            Err(error) => ctx.detection_error = Some(format!("Lint detection failed: {error:#}")),
+        }
+    }
     if ctx.files.len() > 1000 {
         ctx.contents_error =
             Some("More than 1000 changed files; content analysis is unavailable".into());
@@ -256,15 +280,18 @@ async fn analyze_impl(ctx: MrContext) -> RiskReport {
         axes[index] = score;
     }
     let pending_commands = std::iter::once(&ctx.config.complexity)
-        .chain(&ctx.config.lint)
+        .chain(ctx.config.lint_commands())
         .filter(|c| !c.approved)
         .map(|c| PendingCommand {
             key: c.key(),
             id: c.id.clone(),
             command: c.command.clone(),
+            directory: c.directory.clone(),
+            preparation: c.preparation.map(|p| format!("{p:?}")),
         })
         .collect();
     RiskReport {
+        setup_messages: ctx.setup_messages,
         profile: RiskProfile {
             axes,
             computed_at: chrono::Utc::now(),

@@ -95,7 +95,7 @@ Feature: Inspect an explainable risk profile
     Given repository risk.toml introduces a lint command not trusted by my local configuration
     When I calculate risk
     Then that command is shown as Proposed and is not executed
-    And I can approve its exact definition with Allow and calculate
+    And I can approve its exact definition with Allow, install and calculate
 
   @MRDE-RISK-011
   Scenario: Apply layered configuration without reusing an incompatible profile
@@ -103,3 +103,22 @@ Feature: Inspect an explainable risk profile
     When I calculate risk
     Then project values override global values and repository values override project values
     And a profile from another project, base, head or configuration is not reused
+
+  @MRDE-RISK-012 @regression
+  Scenario: Detect lint from the code changed in a merge request
+    Given a monorepo contains Dart, TypeScript and Go packages
+    And the merge request changes only Dart and TypeScript code
+    When I calculate risk without explicit lint configuration
+    Then the reviewed commit's relevant manifests produce proposed lint commands
+    And the Go package and arbitrary CI scripts are not executed
+    And local uncommitted manifest edits do not change the proposals
+
+  @MRDE-RISK-013 @regression @visual
+  Scenario: Install supported tools explicitly
+    Given Lizard is missing and a detected lint command is proposed
+    When I select Detect and install tools
+    Then Lizard is prepared in the managed cache and reused by later calculations
+    And the lint command remains proposed until Allow, install and calculate
+    And progress and setup results remain visible without blocking navigation
+    And setup cancellation or failure leaves the affected axis unavailable
+    And ordinary calculation and refresh do not download packages

@@ -766,6 +766,7 @@ pub fn risk(detail: &MrDetail) -> mrde_core::risk::RiskReport {
         ),
     ];
     RiskReport {
+        setup_messages: vec![],
         profile: RiskProfile {
             axes,
             computed_at: chrono::Utc::now(),

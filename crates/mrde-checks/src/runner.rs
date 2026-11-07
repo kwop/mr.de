@@ -47,7 +47,30 @@ impl Drop for ProcessGroup {
         }
     }
 }
+/// Network-enabled preparation is separate from ordinary, offline checks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Network {
+    Offline,
+    Setup,
+}
+
 pub async fn run(check: &Check, directory: &Path, timeout: Duration) -> Result<Output> {
+    run_in(
+        check,
+        directory,
+        timeout,
+        &crate::environment::Environment::default(),
+        Network::Offline,
+    )
+    .await
+}
+pub async fn run_in(
+    check: &Check,
+    directory: &Path,
+    timeout: Duration,
+    environment: &crate::environment::Environment,
+    network: Network,
+) -> Result<Output> {
     ensure!(
         check.approval == Approval::Approved,
         "Check {} needs local approval",
@@ -57,8 +80,15 @@ pub async fn run(check: &Check, directory: &Path, timeout: Duration) -> Result<O
         .command
         .first()
         .context("A check command cannot be empty")?;
+    ensure!(
+        directory.is_dir(),
+        "Check {} working directory is unavailable",
+        check.id
+    );
+    let program = environment.find(executable, directory).with_context(|| format!(
+        "Tool '{executable}' is not installed or is not executable. Use Detect and install tools, or set an absolute executable path in risk.toml (check {}).", check.id))?;
     let start = Instant::now();
-    let mut command = Command::new(executable);
+    let mut command = Command::new(program);
     command
         .args(&check.command[1..])
         .current_dir(directory)
@@ -67,9 +97,24 @@ pub async fn run(check: &Check, directory: &Path, timeout: Duration) -> Result<O
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("CARGO_NET_OFFLINE", "true")
-        .env("npm_config_offline", "true")
-        .env("PIP_NO_INDEX", "1");
+        .env("PATH", environment.path()?)
+        .env("CI", "true")
+        .env("FLUTTER_SUPPRESS_ANALYTICS", "true")
+        .env("DART_SUPPRESS_ANALYTICS", "true")
+        .env("GOTOOLCHAIN", "local")
+        .env("RUSTUP_AUTO_INSTALL", "0");
+    if network == Network::Offline {
+        command
+            .env("CARGO_NET_OFFLINE", "true")
+            .env("npm_config_offline", "true")
+            .env("PIP_NO_INDEX", "1")
+            .env("GOPROXY", "off");
+    } else {
+        command
+            .env_remove("CARGO_NET_OFFLINE")
+            .env_remove("npm_config_offline")
+            .env_remove("PIP_NO_INDEX");
+    }
     #[cfg(unix)]
     command.process_group(0);
     let mut child = command

@@ -265,6 +265,8 @@ pub struct FileCommit {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskReport {
+    #[serde(default)]
+    pub setup_messages: Vec<String>,
     pub profile: RiskProfile,
     pub verdict_thresholds: VerdictThresholds,
     pub stats: crate::models::DiffStats,
@@ -275,6 +277,10 @@ pub struct RiskReport {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingCommand {
+    #[serde(default)]
+    pub directory: String,
+    #[serde(default)]
+    pub preparation: Option<String>,
     pub key: String,
     pub id: String,
     pub command: Vec<String>,

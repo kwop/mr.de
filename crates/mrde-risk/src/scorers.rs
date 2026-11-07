@@ -125,7 +125,7 @@ impl RiskScorer for FileScorer {
         ))
     }
 }
-fn source(path: &str) -> bool {
+pub(crate) fn source(path: &str) -> bool {
     matches!(
         path.rsplit('.').next(),
         Some(
@@ -577,16 +577,21 @@ async fn command(
         "{} is proposed and needs local approval",
         config.id
     );
+    if let Some(error) = ctx.check_errors.get(&config.key()) {
+        anyhow::bail!("{error}");
+    }
     let mut argv = config.command.clone();
     argv.extend(extra);
-    mrde_checks::runner::run(
+    mrde_checks::runner::run_in(
         &mrde_checks::Check {
             id: config.id.clone(),
             command: argv,
             approval: mrde_checks::Approval::Approved,
         },
-        root,
+        &crate::setup::directory(root, config)?,
         ctx.timeout(),
+        &ctx.environment,
+        mrde_checks::runner::Network::Offline,
     )
     .await
 }
@@ -677,16 +682,49 @@ impl RiskScorer for LintScorer {
         Axis::Lint
     }
     async fn measure(&self, ctx: &MrContext) -> Result<RawMetric> {
-        ensure!(!ctx.config.lint.is_empty(), "No lint commands configured");
+        if let Some(error) = &ctx.detection_error {
+            anyhow::bail!("{error}");
+        }
+        ensure!(
+            !ctx.config.lint_commands().is_empty(),
+            "No supported linter detected for the changed code. Add a [[lint]] command in risk.toml, or use Detect and install tools."
+        );
         let mut details = Vec::new();
-        for config in &ctx.config.lint {
+        for config in ctx.config.lint_commands() {
+            if let Some(error) = ctx.check_errors.get(&config.key()) {
+                anyhow::bail!("{error}");
+            }
             let (before, after) = ctx.snapshot_paths(config).await?;
             let mut diagnostics = Vec::new();
             for root in [&before, &after] {
+                if !ctx.prepared_checks.contains(&config.key()) {
+                    crate::setup::dependencies(
+                        config,
+                        root,
+                        &ctx.environment,
+                        mrde_checks::runner::Network::Offline,
+                    )
+                    .await?;
+                }
                 let result = command(ctx, config, root, vec![]).await?;
-                let warnings = crate::reports::diagnostics(config, &result.stdout, root)?;
+                let text = if config.format == "go_vet" {
+                    format!("{}\n{}", result.stdout, result.stderr)
+                } else {
+                    result.stdout.clone()
+                };
+                let package = crate::setup::directory(root, config)?;
+                let mut warnings = crate::reports::diagnostics(config, &text, &package)?;
+                for warning in &mut warnings {
+                    warning.path = std::path::Path::new(&config.directory)
+                        .join(&warning.path)
+                        .to_string_lossy()
+                        .into_owned();
+                }
                 ensure!(
-                    result.code == Some(0) || result.code == Some(1) && !warnings.is_empty(),
+                    result.code == Some(0)
+                        || matches!(result.code, Some(1..=3))
+                            && !warnings.is_empty()
+                            && (result.code == Some(1) || config.format == "dart"),
                     "Lint {} failed without usable diagnostics (exit {:?})",
                     config.id,
                     result.code

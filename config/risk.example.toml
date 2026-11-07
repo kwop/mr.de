@@ -1,6 +1,7 @@
 # Merge order: ~/.config/mrde/risk.toml -> ~/.config/mrde/projects/<id>/risk.toml
 # -> <repository>/risk.toml. Tables merge; arrays replace. Secrets never belong here.
 # Repository commands remain proposed until explicitly approved locally.
+autodetect_lint = true # Suggest linters for changed code when no [[lint]] is configured.
 baseline_count = 30 # Last merged MRs of this GitLab repository, not the whole group.
 timeout_seconds = 60 # Per scorer/command; a failure produces n/a for that axis.
 coverage_path = "coverage/lcov.info" # Optional, relative to the worktree; Cobertura XML also supported.
@@ -27,7 +28,7 @@ standard_mean = 3.5 # Below: Quick. Partial profiles show their available-axis c
 
 [complexity]
 id = "complexity"
-command = ["lizard", "--xml"] # Installed by the user; computes cyclomatic complexity.
+command = ["lizard", "--xml"] # Detect and install tools prepares it in MR.DE's cache.
 format = "lizard" # Missing executable/unsupported sources: n/a, never zero.
 
 # Weighted share of changed lines; the strongest matching glob wins per file.
@@ -60,8 +61,11 @@ weight = 0.5
 # Lint runs in disposable before/after snapshots; it never installs dependencies.
 # Only *new* diagnostics count. JSON format: {"warnings":[{"path":"src/a.rs",
 # "line":12,"rule":"rule-id","message":"description"}]}.
-# Each command runs with CARGO_NET_OFFLINE=true, npm_config_offline=true, PIP_NO_INDEX=1.
-# Configure commands that operate entirely locally; no automatic package downloads.
+# Ordinary checks run with CARGO_NET_OFFLINE=true, npm_config_offline=true, PIP_NO_INDEX=1.
+# Explicit setup may download tools and locked dependencies. Scoring stays offline.
+# Optional per-command directory = "packages/web" stays inside the snapshot.
+# Optional preparation = "npm" | "cargo" | "dart" | "flutter" | "go" | "ruff"
+# is part of the command approval. SDKs must already be installed.
 # [[lint]]
 # id = "rust"
 # command = ["cargo", "clippy", "--offline", "--message-format=json"]

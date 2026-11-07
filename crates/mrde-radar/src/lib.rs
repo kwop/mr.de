@@ -21,6 +21,10 @@ pub struct ScanRequest {
     pub config_dir: PathBuf,
     pub project: String,
     pub run_checks: bool,
+    /// Explicitly prepare recognized tools and dependencies; may download packages.
+    pub prepare_tools: bool,
+    /// Optional managed-tool cache; callers/tests can isolate all installation writes.
+    pub tool_cache: Option<PathBuf>,
     /// Exact command fingerprints, approved for this invocation only.
     pub approved_commands: HashSet<String>,
 }
@@ -70,36 +74,16 @@ pub async fn scan(request: ScanRequest) -> Result<ScanReport> {
     if let Some(config) = snapshot.file("risk.toml", 1024 * 1024).await? {
         std::fs::write(config_root.path().join("risk.toml"), config)?;
     }
-    let mut config = RiskConfig::load(
+    ensure!(
+        !request.prepare_tools || request.run_checks,
+        "--prepare-tools requires --run-checks"
+    );
+    let config = RiskConfig::load(
         &request.config_dir,
         &request.project,
         config_root.path(),
         &request.approved_commands,
     )?;
-    let commands: Vec<_> = std::iter::once(&config.complexity)
-        .chain(&config.lint)
-        .collect();
-    for approved in &request.approved_commands {
-        ensure!(
-            commands.iter().any(|c| c.key() == *approved),
-            "An approved command fingerprint is not in the current configuration; scan again before approving it"
-        );
-    }
-    let pending: Vec<_> = commands
-        .iter()
-        .filter(|c| !c.approved)
-        .map(|c| PendingCommand {
-            key: c.key(),
-            id: c.id.clone(),
-            command: c.command.clone(),
-        })
-        .collect();
-    let lint_configured = !config.lint.is_empty();
-    if !request.run_checks {
-        for command in std::iter::once(&mut config.complexity).chain(&mut config.lint) {
-            command.approved = false;
-        }
-    }
     let mut warnings =
         vec!["Team median unavailable: standalone scans do not load forge history.".into()];
     let coverage_result: Result<Option<String>> = async {
@@ -162,6 +146,43 @@ pub async fn scan(request: ScanRequest) -> Result<ScanReport> {
     let mut context =
         mrde_risk::context(&snapshot.root, &snapshot.base, &snapshot.head, config).await?;
     context.set_coverage(coverage, &snapshot.source);
+    if let Some(cache) = &request.tool_cache {
+        context.environment = mrde_risk::setup::environment(Some(cache));
+    }
+    let commands: Vec<_> = std::iter::once(&context.config.complexity)
+        .chain(context.config.lint_commands())
+        .collect();
+    for approved in &request.approved_commands {
+        ensure!(
+            commands.iter().any(|c| c.key() == *approved),
+            "An approved command fingerprint is not in the current configuration; scan again before approving it"
+        );
+    }
+    let pending: Vec<_> = commands
+        .iter()
+        .filter(|c| !c.approved)
+        .map(|c| PendingCommand {
+            key: c.key(),
+            id: c.id.clone(),
+            command: c.command.clone(),
+            directory: c.directory.clone(),
+            preparation: c.preparation.map(|p| format!("{p:?}")),
+        })
+        .collect();
+    let lint_configured = !context.config.lint_commands().is_empty();
+    if !request.run_checks {
+        for command in context.config.commands_mut() {
+            command.approved = false;
+        }
+    }
+    if request.prepare_tools {
+        let cache = request
+            .tool_cache
+            .clone()
+            .or_else(mrde_risk::setup::default_cache)
+            .context("Tool cache unavailable; set --tool-cache")?;
+        mrde_risk::setup::prepare(&mut context, &cache).await;
+    }
     let mut report = mrde_risk::analyze(context).await;
     report.pending_commands = pending;
     if !request.run_checks {

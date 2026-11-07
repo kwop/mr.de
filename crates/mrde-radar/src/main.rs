@@ -13,6 +13,8 @@ Usage: mrde-radar [OPTIONS]
   --project ID          risk.toml project override (default: local)
   --config-dir PATH     Configuration root (default: ~/.config/mrde)
   --run-checks          Enable trusted complexity/lint commands via the check executor
+  --prepare-tools       Detect and install supported tools (requires --run-checks)
+  --tool-cache PATH     Managed-tool cache (default: the MR.DE platform cache)
   --allow-command KEY   Approve an exact proposed fingerprint for this run; repeatable
   --format FORMAT      text (default), json or svg
   --json                Shortcut for --format json
@@ -37,6 +39,8 @@ fn parse(args: Vec<String>) -> Result<Options> {
         config_dir: mrde_core::config::config_dir()?,
         project: "local".into(),
         run_checks: false,
+        prepare_tools: false,
+        tool_cache: None,
         approved_commands: HashSet::new(),
     };
     let mut format = "text".to_string();
@@ -51,9 +55,10 @@ fn parse(args: Vec<String>) -> Result<Options> {
         match flag.as_str() {
             "--worktree" => worktree = true,
             "--run-checks" => request.run_checks = true,
+            "--prepare-tools" => request.prepare_tools = true,
             "--json" => format = "json".into(),
             "--repo" | "--base" | "--head" | "--project" | "--config-dir" | "--allow-command"
-            | "--format" => {
+            | "--format" | "--tool-cache" => {
                 let value = args
                     .next()
                     .with_context(|| format!("{flag} requires a value"))?;
@@ -66,6 +71,7 @@ fn parse(args: Vec<String>) -> Result<Options> {
                     "--base" => request.base = value,
                     "--head" => request.head = Some(value),
                     "--project" => request.project = value,
+                    "--tool-cache" => request.tool_cache = Some(value.into()),
                     "--config-dir" => request.config_dir = PathBuf::from(value),
                     "--allow-command" => {
                         request.approved_commands.insert(value);
@@ -92,6 +98,10 @@ fn parse(args: Vec<String>) -> Result<Options> {
     ensure!(
         request.run_checks || request.approved_commands.is_empty(),
         "--allow-command requires --run-checks"
+    );
+    ensure!(
+        !request.prepare_tools || request.run_checks,
+        "--prepare-tools requires --run-checks"
     );
     Ok(Options { request, format })
 }

@@ -324,6 +324,9 @@ impl Cockpit {
             "Risk profile ready · {}/8 axes · unavailable axes are excluded from the mean.",
             report.profile.available()
         );
+        for message in &report.setup_messages {
+            self.log(message);
+        }
         self.risk = Some((id, report));
     }
 
@@ -341,15 +344,16 @@ impl Cockpit {
             .flex_shrink_0()
             .gap_4()
             .min_w_0()
-            .child(
-                heading(
-                    "Changes",
-                    Some("Risk profile · changed files · owners and history".into()),
-                )
-                .when(report.is_some(), |row| row.child(self.risk_controls(cx))),
-            );
+            .child(heading(
+                "Changes",
+                Some("Risk profile · changed files · owners and history".into()),
+            ));
         match report {
             Some(report) => {
+                view = view.child(self.risk_controls(cx));
+                for message in &report.setup_messages {
+                    view = view.child(card().child(muted(message.clone())));
+                }
                 for pending in &report.pending_commands {
                     view = view.child(self.pending_command(pending, cx));
                 }
@@ -368,7 +372,7 @@ impl Cockpit {
                         .child(muted(
                             "It runs locally in the MR worktree (created if missing). Missing tools leave an axis n/a, never zero. Claude never starts automatically.",
                         ))
-                        .child(div().flex().child(self.calculate_button(cx))),
+                        .child(div().flex().gap_2().flex_wrap().child(self.calculate_button(cx)).child(self.setup_tools_button(cx))),
                 );
             }
         }
@@ -381,6 +385,19 @@ impl Cockpit {
                     .flex_shrink_0(),
             )
             .into_any_element()
+    }
+
+    fn setup_tools_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        div().debug_selector(|| "setup-risk-tools".into()).child(
+            Button::new("setup-risk-tools").small().label("Detect and install tools")
+                .disabled(self.is_busy())
+                .tooltip("Detect linters for the changed code, install supported tools, and prepare approved checks. Downloads may be required.")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(detail) = this.detail.clone() {
+                        this.start(Action::SetupRiskTools(detail), "Detecting and installing risk tools…", cx);
+                    }
+                }))
+        ).into_any_element()
     }
 
     fn calculate_button(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -407,6 +424,7 @@ impl Cockpit {
     fn risk_controls(&self, cx: &mut Context<Self>) -> Div {
         div()
             .flex()
+            .flex_wrap()
             .flex_shrink_0()
             .items_center()
             .gap_2()
@@ -428,6 +446,7 @@ impl Cockpit {
                         })),
                 ),
             )
+            .child(self.setup_tools_button(cx))
             .child(self.calculate_button(cx))
     }
 
@@ -446,18 +465,18 @@ impl Cockpit {
                             .flex_1()
                             .min_w_0()
                             .text_color(rgb(INK))
-                            .child(format!("The repository asks to run the {} check", pending.id)),
+                            .child(format!("Proposed check: {}", pending.id)),
                     )
                     .child(
                         Button::new(SharedString::from(format!("allow-risk-{key}")))
                             .xsmall()
-                            .label("Allow and calculate")
+                            .label("Allow, install and calculate")
                             .disabled(self.is_busy())
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if let Some(detail) = this.detail.clone() {
                                     this.start(
                                         Action::ApproveRiskCommand(detail, key.clone()),
-                                        "Approving this command and calculating risk…",
+                                        "Preparing the approved check and calculating risk…",
                                         cx,
                                     );
                                 }
@@ -465,6 +484,8 @@ impl Cockpit {
                     ),
             )
             .child(code(pending.command.join(" "), INK))
+            .when(!pending.directory.is_empty(), |card| card.child(muted(format!("Package: {}", pending.directory))))
+            .when(pending.preparation.is_some(), |card| card.child(muted("Allowing this check also prepares its locked dependencies in isolated snapshots; downloads may be required.")))
             .child(muted(
                 "It runs without a shell in disposable snapshots of the base and head commits, only after you allow this exact command.",
             ))

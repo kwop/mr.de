@@ -1,4 +1,5 @@
 //! Check definitions, results and a bounded executor for locally approved commands.
+pub mod environment;
 pub mod runner;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
