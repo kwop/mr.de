@@ -11,7 +11,7 @@ fn config_for(env: &Env, config: &Config, path: &Path) -> anyhow::Result<RiskCon
         .store()?
         .cached(&approvals_key(config))?
         .unwrap_or_default();
-    RiskConfig::load(&config_dir()?, &config.id, path, &approvals)
+    RiskConfig::load(&env.settings, &config.id, path, &approvals)
 }
 async fn prepare(env: &Env, config: &Config, detail: &MrDetail) -> anyhow::Result<PathBuf> {
     let trees = Worktrees::new(&env.cache, &config.namespace());
@@ -191,4 +191,215 @@ pub(super) async fn baseline(
         &baseline,
     )?;
     Ok(Outcome::RiskBaseline(detail.mr.id.clone(), baseline))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    fn git(directory: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .current_dir(directory)
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().into()
+    }
+    fn commit(directory: &Path, files: &[(&str, &str)], message: &str) -> String {
+        for (path, text) in files {
+            let path = directory.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        git(directory, &["add", "."]);
+        git(directory, &["commit", "-qm", message]);
+        git(directory, &["rev-parse", "HEAD"])
+    }
+    fn mr(iid: u64, base: &str, sha: &str) -> MergeRequest {
+        serde_json::from_value(serde_json::json!({
+            "id": {"project": 1, "iid": iid}, "title": format!("MR {iid}"), "description": "",
+            "project": "team/project", "author": "alice",
+            "web_url": format!("https://gitlab.example.com/team/project/-/merge_requests/{iid}"),
+            "sha": sha, "base_sha": base, "created_at": "2026-11-01T00:00:00Z", "labels": [],
+            "pipeline": null, "approvals": null, "changed_lines": null
+        }))
+        .unwrap()
+    }
+    /// Answers merged history and summaries from a list, most recently merged first.
+    struct History(Vec<MergeRequest>);
+    #[async_trait]
+    impl Forge for History {
+        async fn merged_history(&self, _: u64, limit: usize) -> anyhow::Result<Vec<MrId>> {
+            Ok(self.0.iter().take(limit).map(|mr| mr.id.clone()).collect())
+        }
+        async fn summary(&self, id: &MrId) -> anyhow::Result<MergeRequest> {
+            self.0
+                .iter()
+                .find(|mr| mr.id == *id)
+                .cloned()
+                .context("Unknown MR")
+        }
+        async fn test_connection(&self) -> anyhow::Result<String> {
+            Ok("me".into())
+        }
+        async fn queue(
+            &self,
+            _: &[mrde_core::config::MrRole],
+        ) -> anyhow::Result<Vec<MergeRequest>> {
+            Ok(vec![])
+        }
+        async fn approval_count(&self, _: &MrId) -> anyhow::Result<Option<u64>> {
+            Ok(None)
+        }
+        async fn detail(&self, _: &MrId) -> anyhow::Result<MrDetail> {
+            anyhow::bail!("Not used by risk actions")
+        }
+        async fn approve(&self, _: &MrId, _: &str) -> anyhow::Result<()> {
+            anyhow::bail!("Not used by risk actions")
+        }
+    }
+
+    #[tokio::test]
+    async fn changes_measure_the_mr_its_merged_history_and_file_history_locally() {
+        let temp = tempfile::tempdir().unwrap();
+        let origin = temp.path().join("origin");
+        std::fs::create_dir_all(&origin).unwrap();
+        git(&origin, &["init", "-q"]);
+        git(&origin, &["config", "user.email", "developer@example.com"]);
+        git(&origin, &["config", "user.name", "Developer"]);
+        let initial = commit(&origin, &[("src/lib.rs", "pub fn lib() {}\n")], "Initial");
+        let tested = commit(
+            &origin,
+            &[
+                ("src/user.rs", "pub fn user() {}\n"),
+                ("tests/user.rs", "#[test]\nfn user() {}\n"),
+            ],
+            "Add users",
+        );
+        let untested = commit(
+            &origin,
+            &[("src/report.rs", &"pub fn report() {}\n".repeat(40))],
+            "Add reports",
+        );
+        let head = commit(
+            &origin,
+            &[(
+                "src/user.rs",
+                "pub fn user() {}\npub fn rename() { load().unwrap(); }\n",
+            )],
+            "Rename users",
+        );
+        git(
+            &origin,
+            &["update-ref", "refs/merge-requests/20/head", &head],
+        );
+        let config = Config {
+            gitlab_url: "https://gitlab.example.com".into(),
+            ..Default::default()
+        };
+        // The project's mirror points at the local origin instead of an SSH remote.
+        let cache = temp.path().join("cache");
+        let repository = cache
+            .join("git")
+            .join(mrde_git::instance_key(&config.namespace()))
+            .join("1.git");
+        std::fs::create_dir_all(&repository).unwrap();
+        git(&repository, &["init", "-q", "--bare"]);
+        git(
+            &repository,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+        let detail = MrDetail {
+            mr: mr(20, &untested, &head),
+            files: vec![],
+            issues: vec![],
+            ssh_url: "git@example.invalid:team/project.git".into(),
+        };
+        let env = Env {
+            forge: Arc::new(History(vec![
+                mr(11, &tested, &untested),
+                mr(10, &initial, &tested),
+                mr(12, &initial, &"f".repeat(40)),
+            ])),
+            cache,
+            settings: temp.path().join("config"),
+        };
+
+        let Outcome::Risk(_, report) =
+            run(&env, config.clone(), Action::Risk(Box::new(detail.clone())))
+                .await
+                .unwrap()
+        else {
+            panic!("expected a risk report");
+        };
+        let value = |axis: Axis| {
+            report.profile.axes[axis.index()]
+                .raw
+                .as_ref()
+                .map(|r| r.value)
+        };
+        assert_eq!(value(Axis::DiffSize), Some(1.));
+        assert_eq!(
+            value(Axis::TestGap),
+            Some(1.),
+            "one added line, no test change"
+        );
+        assert_eq!(value(Axis::Debt), Some(1.));
+        assert_eq!(value(Axis::Coupling), Some(0.));
+        assert_eq!(report.profile.axes[Axis::Lint.index()].score, None);
+        assert_eq!(
+            report.profile.verdict(&report.verdict_thresholds),
+            Some(Verdict::Quick)
+        );
+        assert!(cached(&env, &config, &detail).unwrap().is_some());
+
+        let Outcome::RiskBaseline(_, baseline) = run(
+            &env,
+            config.clone(),
+            Action::RiskBaseline(Box::new(detail.clone())),
+        )
+        .await
+        .unwrap() else {
+            panic!("expected a baseline");
+        };
+        assert_eq!(baseline.merged_mrs, 3);
+        assert_eq!(
+            baseline.samples[Axis::DiffSize.index()],
+            2,
+            "a commit missing locally is not counted as zero"
+        );
+        assert_eq!(baseline.warnings.len(), 1);
+        assert!(
+            baseline.warnings[0].starts_with("!12"),
+            "{:?}",
+            baseline.warnings
+        );
+        // The tested MR has no gap; the other adds 40 untested lines (2.6): median 1.3.
+        let gap = baseline.medians[Axis::TestGap.index()].unwrap();
+        assert!((gap - 1.3).abs() < 0.01, "{gap}");
+
+        let Outcome::RiskFile(_, _, file) = run(
+            &env,
+            config,
+            Action::RiskFile(Box::new(detail), "src/user.rs".into()),
+        )
+        .await
+        .unwrap() else {
+            panic!("expected the file history");
+        };
+        let own: Vec<bool> = file.commits.iter().map(|c| c.in_mr).collect();
+        assert_eq!(own, [true, false], "the MR's commit, then the earlier one");
+        assert_eq!(file.authors, [("Developer".to_string(), 100.)]);
+    }
 }

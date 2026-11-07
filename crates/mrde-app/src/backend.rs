@@ -242,6 +242,7 @@ impl Executor for SystemExecutor {
         let env = Env {
             forge,
             cache: cache_dir()?,
+            settings: config_dir()?,
         };
         let namespace = config.namespace();
         let (outcome, user) = tokio::join!(run(&env, config, action), async {
@@ -441,6 +442,8 @@ fn open_store(cache: &std::path::Path) -> anyhow::Result<Store> {
 pub struct Env {
     pub forge: Arc<dyn Forge>,
     pub cache: PathBuf,
+    /// `~/.config/mrde`, where user and project risk settings live.
+    pub settings: PathBuf,
 }
 impl Env {
     fn store(&self) -> anyhow::Result<Store> {
@@ -907,6 +910,7 @@ mod tests {
         let env = Env {
             forge: Arc::new(GitHub::new(&server.uri(), "token").unwrap()),
             cache: temp.path().to_path_buf(),
+            settings: temp.path().join("config"),
         };
         let mut config = config();
         config.provider = mrde_core::config::Provider::Github;
@@ -932,6 +936,7 @@ mod tests {
         Env {
             forge: forge.clone(),
             cache: temp.path().to_path_buf(),
+            settings: temp.path().join("config"),
         }
     }
     fn config() -> Config {
@@ -1150,6 +1155,7 @@ mod tests {
         let env = Env {
             forge: Arc::new(Offline),
             cache: temp.path().to_path_buf(),
+            settings: temp.path().join("config"),
         };
         let outcome = run(&env, config(), Action::Worktrees).await.unwrap();
         assert!(matches!(outcome, Outcome::Worktrees(list, None) if list.is_empty()));
