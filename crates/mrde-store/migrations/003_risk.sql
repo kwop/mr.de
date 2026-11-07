@@ -1,5 +1,5 @@
 BEGIN;
-CREATE TABLE risk_profiles (
+CREATE TABLE IF NOT EXISTS risk_profiles (
     namespace TEXT NOT NULL,
     project_id INTEGER NOT NULL,
     iid INTEGER NOT NULL,
@@ -10,6 +10,6 @@ CREATE TABLE risk_profiles (
     payload TEXT NOT NULL,
     PRIMARY KEY(namespace, project_id, iid, base_sha, head_sha, config_key)
 );
-CREATE INDEX risk_latest ON risk_profiles(namespace, project_id, iid, head_sha, computed_at DESC);
+CREATE INDEX IF NOT EXISTS risk_latest ON risk_profiles(namespace, project_id, iid, head_sha, computed_at DESC);
 PRAGMA user_version = 3;
 COMMIT;

@@ -45,6 +45,11 @@ mod tests {
             pending_commands: vec![],
         };
         store.save_risk("project-a", &id, &report).unwrap();
+        // Opening the same database concurrently can observe the old schema version.
+        store
+            .connection
+            .execute_batch(include_str!("../migrations/003_risk.sql"))
+            .unwrap();
         assert!(
             store
                 .risk("project-a", &id, "head", "base", "config-v1")
