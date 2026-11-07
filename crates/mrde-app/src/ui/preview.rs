@@ -254,10 +254,34 @@ impl Cockpit {
                 window,
                 cx,
             );
-            if scenario == "image:zoom" {
-                self.image_viewer
-                    .update(cx, |viewer, cx| viewer.set_zoom(3., window, cx));
-            }
+            let zoom = match scenario.as_str() {
+                "image:max" => 8.,
+                "image:zoom" => 4.,
+                _ => 1.,
+            };
+            // Zoom only after decoding, as a real user does, so captures keep the focal point.
+            // Position the preview pointer over the image to inspect the magnifier.
+            let handle = window.window_handle();
+            let viewer = self.image_viewer.clone();
+            cx.spawn(async move |_, cx| {
+                gpui::Timer::after(std::time::Duration::from_millis(1000)).await;
+                let _ = handle.update(cx, |_, window, cx| {
+                    let size = window.viewport_size();
+                    viewer.update(cx, |viewer, cx| {
+                        viewer.set_zoom(zoom, window, cx);
+                        viewer.pointer_move(
+                            &gpui::MouseMoveEvent {
+                                position: gpui::point(size.width / 2., size.height / 2.),
+                                pressed_button: None,
+                                modifiers: gpui::Modifiers::none(),
+                            },
+                            window,
+                            cx,
+                        )
+                    });
+                });
+            })
+            .detach();
         }
         if std::env::var("MRDE_SCENARIO").as_deref() == Ok("open") {
             self.show_open_dialog(window, cx);

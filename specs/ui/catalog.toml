@@ -159,15 +159,15 @@ inspect = ["Before, after and difference have unambiguous labels and preserved i
 id = "image.fit"
 title = "Fitted portrait image"
 scenario = "image"
-contracts = ["MRDE-IMAGE-001"]
+contracts = ["MRDE-IMAGE-001", "MRDE-IMAGE-006"]
 inspect = ["The top and bottom fit below the toolbar.", "Close and zoom controls do not collide with window controls."]
 
 [[story]]
 id = "image.zoom"
 title = "Magnified portrait image"
 scenario = "image:zoom"
-contracts = ["MRDE-IMAGE-002", "MRDE-IMAGE-003"]
-inspect = ["Zoom controls remain visible; verify wheel, trackpad and scrollbar movement interactively."]
+contracts = ["MRDE-IMAGE-002", "MRDE-IMAGE-003", "MRDE-IMAGE-006", "MRDE-IMAGE-007"]
+inspect = ["The plus magnifier stays legible; verify click zoom, grab panning and scrolling interactively."]
 
 [[story]]
 id = "approval.confirm"
@@ -196,3 +196,10 @@ title = "Debug log drawer"
 scenario = "logs"
 contracts = ["MRDE-UI-005"]
 inspect = ["Logs have readable timestamps and leave navigation accessible.", "This story opens the drawer; settings error interactions are covered by GPUI tests."]
+
+[[story]]
+id = "image.max"
+title = "Maximum image zoom returns to fit"
+scenario = "image:max"
+contracts = ["MRDE-IMAGE-006"]
+inspect = ["The magnifier shows a minus at 800% and the toolbar explains Click to fit.", "Inspect the cursor outline over both light and dark image areas."]

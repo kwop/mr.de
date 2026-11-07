@@ -64,7 +64,7 @@ Screen Recording permission, so this works from a terminal or an agent.
 
 | Variable | Effect |
 |---|---|
-| `MRDE_SCENARIO` | `queue`, `detail:<tab>`, `focus:<tab>` (queue hidden), `confirm`, `worktrees`, `settings`, `logs`, `threads`, `threads:terminal`, `ask` (a questions thread with the local preview shell), `settings:github` (a GitHub project's settings), `open` (the "Open MR…" dialog). Tabs: `description`, `structure`, `files`, `review`, `statistics`, `history`, `risks`, `checks`, `visual`. |
+| `MRDE_SCENARIO` | `queue`, `detail:<tab>`, `focus:<tab>` (queue hidden), `confirm`, `worktrees`, `settings`, `logs`, `threads`, `threads:terminal`, `ask` (a questions thread with the local preview shell), `settings:github` (a GitHub project's settings), `open` (the "Open MR…" dialog), `image`, `image:zoom` (4×), `image:max` (8×). Image scenarios position a preview pointer over the image for cursor inspection. Tabs: `description`, `structure`, `files`, `review`, `statistics`, `history`, `risks`, `checks`, `visual`. |
 | `MRDE_SCENARIO_MR` | Demo merge request to open, for example `244` (180 files). Default `231`. |
 | `MRDE_SCENARIO_FRESH` | Show the tabs before any analysis, tour, or screenshots. |
 | `MRDE_SCENARIO_RISK` | Color the Disktree by risk. |
