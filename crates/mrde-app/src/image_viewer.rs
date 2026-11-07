@@ -346,11 +346,17 @@ impl Render for ImageViewer {
                         },
                     )))
                     .child(
-                        control("image-zoom-in", format!("Zoom {:.0}%", self.zoom * 100.))
-                            .child(Icon::new(IconName::Search).size(px(14.)))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_zoom(this.next_zoom(), window, cx);
-                            })),
+                        control(
+                            "image-zoom-in",
+                            crate::tr!(
+                                "Zoom {value0}%",
+                                value0 = format!("{:.0}", self.zoom * 100.)
+                            ),
+                        )
+                        .child(Icon::new(IconName::Search).size(px(14.)))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.set_zoom(this.next_zoom(), window, cx);
+                        })),
                     )
                     .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child(
                         if self.zoom >= MAX_ZOOM {
@@ -376,7 +382,7 @@ impl Render for ImageViewer {
                             .items_center()
                             .gap_2()
                             .child(Icon::new(IconName::Close).size(px(14.)))
-                            .child("Close")
+                            .child(crate::i18n::t("Close"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 cx.stop_propagation();
                                 this.close(window, cx);
@@ -451,7 +457,7 @@ impl Render for ImageViewer {
                                                             .items_center()
                                                             .justify_center()
                                                             .text_color(rgb(MUTED))
-                                                            .child("Loading image…")
+                                                            .child(crate::i18n::t("Loading image…"))
                                                             .into_any_element()
                                                     })
                                                     .with_fallback(|| {
@@ -464,7 +470,9 @@ impl Render for ImageViewer {
                                                             .items_center()
                                                             .justify_center()
                                                             .text_color(rgb(MUTED))
-                                                            .child("Could not load this image.")
+                                                            .child(crate::i18n::t(
+                                                                "Could not load this image.",
+                                                            ))
                                                             .into_any_element()
                                                     }),
                                             ),

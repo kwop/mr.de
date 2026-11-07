@@ -14,7 +14,8 @@ chrono.workspace = true
 serde.workspace = true
 async-trait.workspace = true
 
-[dev-dependencies]
 serde_json.workspace = true
+
+[dev-dependencies]
 tokio.workspace = true
 toml = "0.8"

@@ -31,9 +31,9 @@ impl Cockpit {
                             .text_color(rgb(SUBTLE)),
                     )
                     .child(if busy {
-                        "Listing worktrees…"
+                        crate::i18n::t("Listing worktrees…")
                     } else {
-                        "No worktrees. Reviews, statistics, compliance checks, and questions to Claude create them."
+                        crate::i18n::t("No worktrees. Reviews, statistics, compliance checks, and questions to Claude create them.")
                     }),
             );
         }
@@ -43,91 +43,92 @@ impl Cockpit {
                 .iter()
                 .find(|mr| mr.id.project == entry.project && mr.id.iid == entry.iid)
                 .map(|mr| mr.title.clone())
-                .unwrap_or_else(|| format!("Project {} merge request", entry.project));
+                .unwrap_or_else(|| {
+                    crate::tr!("Project {value0} merge request", value0 = entry.project)
+                });
             let (state, color) = match entry.changes {
                 Some(0) => ("Clean".to_string(), SUCCESS),
-                Some(n) => (format!("{n} local or ignored files"), WARNING),
+                Some(n) => (crate::tr!("{n} local or ignored files", n = n), WARNING),
                 None => ("Cannot inspect".to_string(), ERROR),
             };
             let removable = entry.changes == Some(0);
             let reveal = entry.path.clone();
             let remove = entry.clone();
-            list =
-                list.child(
-                    div()
-                        .debug_selector(move || format!("worktree-{index}"))
-                        .flex_shrink_0()
-                        .px_5()
-                        .py_3()
-                        .border_b_1()
-                        .border_color(rgb(LINE))
-                        .flex()
-                        .items_center()
-                        .gap_4()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_color(rgb(HEADING))
-                                        .one_line()
-                                        .child(crate::ellipsis::ellipsis(title)),
-                                )
-                                .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child(
-                                    format!(
-                                        "!{} · commit {}",
-                                        entry.iid,
-                                        entry.sha.chars().take(12).collect::<String>()
-                                    ),
-                                ))
-                                .child(
-                                    div()
-                                        .font_family(CODE_FONT)
-                                        .text_size(px(11.))
-                                        .text_color(rgb(SUBTLE))
-                                        .one_line()
-                                        .child(crate::ellipsis::ellipsis(
-                                            entry.path.display().to_string(),
-                                        )),
+            list = list.child(
+                div()
+                    .debug_selector(move || format!("worktree-{index}"))
+                    .flex_shrink_0()
+                    .px_5()
+                    .py_3()
+                    .border_b_1()
+                    .border_color(rgb(LINE))
+                    .flex()
+                    .items_center()
+                    .gap_4()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_color(rgb(HEADING))
+                                    .one_line()
+                                    .child(crate::ellipsis::ellipsis(title)),
+                            )
+                            .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child(
+                                crate::tr!(
+                                    "!{value0} · commit {value1}",
+                                    value0 = entry.iid,
+                                    value1 = entry.sha.chars().take(12).collect::<String>()
                                 ),
-                        )
-                        .child(
-                            div()
-                                .w(px(170.))
-                                .flex_shrink_0()
-                                .text_size(px(12.))
-                                .text_color(rgb(color))
-                                .child(state),
-                        )
-                        .child(
-                            Button::new(("reveal-worktree", index))
-                                .small()
-                                .ghost()
-                                .label("Reveal")
-                                .on_click(move |_, _, cx| cx.reveal_path(&reveal)),
-                        )
-                        .child(
-                            div()
-                                .debug_selector(move || format!("clean-worktree-{index}"))
-                                .child(
-                                    Button::new(("clean-worktree", index))
-                                        .small()
-                                        .label("Clean")
-                                        .disabled(busy || !removable)
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.start(
-                                                Action::RemoveWorktree(remove.clone()),
-                                                "Removing worktree…",
-                                                cx,
-                                            );
-                                        })),
-                                ),
-                        ),
-                );
+                            ))
+                            .child(
+                                div()
+                                    .font_family(CODE_FONT)
+                                    .text_size(px(11.))
+                                    .text_color(rgb(SUBTLE))
+                                    .one_line()
+                                    .child(crate::ellipsis::ellipsis(
+                                        entry.path.display().to_string(),
+                                    )),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(px(170.))
+                            .flex_shrink_0()
+                            .text_size(px(12.))
+                            .text_color(rgb(color))
+                            .child(state),
+                    )
+                    .child(
+                        Button::new(("reveal-worktree", index))
+                            .small()
+                            .ghost()
+                            .label(crate::i18n::t("Reveal"))
+                            .on_click(move |_, _, cx| cx.reveal_path(&reveal)),
+                    )
+                    .child(
+                        div()
+                            .debug_selector(move || format!("clean-worktree-{index}"))
+                            .child(
+                                Button::new(("clean-worktree", index))
+                                    .small()
+                                    .label(crate::i18n::t("Clean"))
+                                    .disabled(busy || !removable)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.start(
+                                            Action::RemoveWorktree(remove.clone()),
+                                            "Removing worktree…",
+                                            cx,
+                                        );
+                                    })),
+                            ),
+                    ),
+            );
         }
         div()
             .flex_1()
@@ -159,7 +160,7 @@ impl Cockpit {
                                         div()
                                             .text_color(rgb(HEADING))
                                             .font_weight(FontWeight::MEDIUM)
-                                            .child("Worktrees"),
+                                            .child(crate::i18n::t("Worktrees")),
                                     )
                                     .child(
                                         div()
@@ -172,7 +173,7 @@ impl Cockpit {
                                 div()
                                     .text_size(px(12.))
                                     .text_color(rgb(SUBTLE))
-                                    .child("Clean never deletes local changes or ignored files; resolve them first."),
+                                    .child(crate::i18n::t("Clean never deletes local changes or ignored files; resolve them first.")),
                             ),
                     )
                     .child(
@@ -181,7 +182,7 @@ impl Cockpit {
                                 .small()
                                 .ghost()
                                 .icon(IconName::Redo)
-                                .label("Refresh")
+                                .label(crate::i18n::t("Refresh"))
                                 .disabled(busy)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.start(Action::Worktrees, "Listing worktrees…", cx);

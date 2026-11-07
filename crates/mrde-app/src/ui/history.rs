@@ -29,7 +29,7 @@ impl Cockpit {
     pub(super) fn history_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(insights) = self.current_insights() else {
             return self.analyze_prompt(
-                "Analyze the worktree to see why removed code existed, which files have a history of fixes, who knows each zone, and which MRs touch the same files.",
+                crate::i18n::t("Analyze the worktree to see why removed code existed, which files have a history of fixes, who knows each zone, and which MRs touch the same files."),
                 cx,
             );
         };
@@ -41,11 +41,13 @@ impl Cockpit {
             .flex_col()
             .gap_4()
             .child(heading(
-                "Why was it there?",
+                crate::i18n::t("Why was it there?"),
                 Some("Origin of the largest removed blocks".into()),
             ));
         if insights.removed.is_empty() {
-            view = view.child(muted("The MR does not remove existing lines."));
+            view = view.child(muted(crate::i18n::t(
+                "The MR does not remove existing lines.",
+            )));
         }
         for (index, block) in insights.removed.iter().enumerate() {
             let mut lines = div()
@@ -66,7 +68,10 @@ impl Cockpit {
                         .gap_3()
                         .child(path_line(&block.path, Some(block.line)).flex_1())
                         .when(block.pure_deletion, |row| {
-                            row.child(badge("removed without replacement", WARNING))
+                            row.child(badge(
+                                crate::i18n::t("removed without replacement"),
+                                WARNING,
+                            ))
                         }),
                 )
                 .child(lines);
@@ -92,11 +97,11 @@ impl Cockpit {
                                 .gap_2()
                                 .text_size(px(12.))
                                 .text_color(rgb(MUTED))
-                                .child(format!(
-                                    "Added {} by {} · {}",
-                                    origin.date,
-                                    origin.author,
-                                    origin.sha.chars().take(8).collect::<String>()
+                                .child(crate::tr!(
+                                    "Added {value0} by {value1} · {value2}",
+                                    value0 = origin.date,
+                                    value1 = origin.author,
+                                    value2 = origin.sha.chars().take(8).collect::<String>()
                                 ))
                                 .child(references),
                         )
@@ -107,16 +112,16 @@ impl Cockpit {
                         );
                 }
                 None => {
-                    item = item.child(muted(
+                    item = item.child(muted(crate::i18n::t(
                         "Origin unknown: the lines predate the available history.",
-                    ))
+                    )))
                 }
             }
             view = view.child(item);
         }
 
         view = view.child(heading(
-            "Risk by file",
+            crate::i18n::t("Risk by file"),
             Some("Last 6 months on the target branch: changes, fix commits, authors".into()),
         ));
         let mut risks = card().debug_selector(|| "file-risks".into()).p_0().gap_0();
@@ -165,22 +170,27 @@ impl Cockpit {
                             ),
                     )
                     .when_some(file.last_fix.clone(), |row, fix| {
-                        row.child(code(format!("last fix  {fix}"), MUTED).pl(px(76.)))
+                        row.child(code(crate::tr!("last fix  {fix}", fix = fix), MUTED).pl(px(76.)))
                     }),
             );
         }
         view = view.child(if insights.history.is_empty() {
-            muted("No history available for the changed files.").into_any_element()
+            muted(crate::i18n::t(
+                "No history available for the changed files.",
+            ))
+            .into_any_element()
         } else {
             risks.into_any_element()
         });
 
         view = view.child(heading(
-            "Who knows this code",
+            crate::i18n::t("Who knows this code"),
             Some("Commits in the last 12 months per zone".into()),
         ));
         if insights.experts.is_empty() {
-            view = view.child(muted("No recent commits in the changed zones."));
+            view = view.child(muted(crate::i18n::t(
+                "No recent commits in the changed zones.",
+            )));
         }
         let mut experts = card().debug_selector(|| "experts".into()).p_0().gap_0();
         for (index, expert) in insights.experts.iter().enumerate() {
@@ -215,7 +225,7 @@ impl Cockpit {
                 );
             }
             for owner in &expert.owners {
-                people = people.child(badge(format!("owner {owner}"), SUCCESS));
+                people = people.child(badge(crate::tr!("owner {owner}", owner = owner), SUCCESS));
             }
             experts = experts.child(
                 div()
@@ -234,19 +244,19 @@ impl Cockpit {
         }
 
         view = view.child(heading(
-            "Overlapping merge requests",
+            crate::i18n::t("Overlapping merge requests"),
             Some("Open, or merged in the last 14 days, touching the same files".into()),
         ));
         match &insights.overlaps {
             None => {
-                view = view.child(muted(
+                view = view.child(muted(crate::i18n::t(
                     "GitLab was not reachable during the analysis; overlaps are unknown.",
-                ))
+                )))
             }
             Some(overlaps) if overlaps.is_empty() => {
-                view = view.child(muted(
+                view = view.child(muted(crate::i18n::t(
                     "No other open or recently merged MR touches these files.",
-                ))
+                )))
             }
             Some(overlaps) => {
                 for (index, overlap) in overlaps.iter().enumerate() {
@@ -259,9 +269,9 @@ impl Cockpit {
                                 .items_center()
                                 .gap_3()
                                 .child(if overlap.merged {
-                                    badge("merged", INFO)
+                                    badge(crate::i18n::t("merged"), INFO)
                                 } else {
-                                    badge("open", WARNING)
+                                    badge(crate::i18n::t("open"), WARNING)
                                 })
                                 .child(
                                     div()
@@ -294,7 +304,7 @@ impl Cockpit {
                                         )))
                                         .xsmall()
                                         .ghost()
-                                        .label("Open")
+                                        .label(crate::i18n::t("Open"))
                                         .on_click(move |_, _, cx| cx.open_url(&url)),
                                     ),
                                 ),
@@ -303,9 +313,9 @@ impl Cockpit {
                         item = item.child(path_line(file, None));
                     }
                     if overlap.merged {
-                        item = item.child(muted(
+                        item = item.child(muted(crate::i18n::t(
                             "Merged after this MR started? Check that the MR is rebased on it.",
-                        ));
+                        )));
                     }
                     view = view.child(item);
                 }

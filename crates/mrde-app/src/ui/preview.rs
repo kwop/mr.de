@@ -71,6 +71,12 @@ impl Cockpit {
     }
     pub(super) fn apply_preview_scenario_named(&mut self, scenario: &str) {
         let scenario = scenario.to_string();
+        if let Ok(value) = std::env::var("MRDE_LANGUAGE")
+            && let Some(language) = mrde_core::language::Language::parse(&value)
+        {
+            self.config.languages.interface = language;
+            self.language_draft = self.config.languages;
+        }
         self.config.gitlab_url = demo::INSTANCE.into();
         self.config.name = "Platform".into();
         self.projects = vec![
@@ -164,6 +170,7 @@ impl Cockpit {
             }
             "settings" => {
                 self.settings = true;
+                self.language_page = argument == "languages";
                 if argument == "github" {
                     self.config = self.projects[1].clone();
                     self.queue.clear();

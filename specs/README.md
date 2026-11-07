@@ -9,6 +9,8 @@ scenario names a provider, **request** means a GitLab merge request or GitHub pu
 
 | Feature | Contract |
 | --- | --- |
+| [Languages](features/languages.feature) | Independent global interface and information languages |
+| [Terminal](features/terminal.feature) | Shared-service TUI, interaction, background work and exports |
 | [Projects](features/projects.feature) | Profiles, TOML, migration and isolation |
 | [Connection settings](features/connection_settings.feature) | Test, Save, secret retention and errors |
 | [Inbox](features/inbox.feature) | Eligibility, priority, filters, labels, pagination and refresh |

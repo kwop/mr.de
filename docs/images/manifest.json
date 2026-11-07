@@ -1,0 +1,269 @@
+{
+  "platform": "macOS",
+  "date": "2026-11-07",
+  "baseline_approved": false,
+  "captures": [
+    {
+      "image": "queue.png",
+      "state": "inbox.default",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:02:51.542733+00:00",
+      "sha256": "d8a68b1b96c579c6a8d761211ab6730408b28155f2b25c1cd816404ed556bf4f",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "search.png",
+      "state": "inbox.filtered",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:02:55.088259+00:00",
+      "sha256": "39ad1f66d974cf758a44543f27578565e26bb2a441d1f366c900a31f3ff14cd8",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "reader.png",
+      "state": "reader.inbox",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:02:58.815338+00:00",
+      "sha256": "f8484aa6ebec25bea87903a13d255078993458fdb2689595b8d15e231674ddec",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "context.png",
+      "state": "context.docked",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:03:06.213115+00:00",
+      "sha256": "a6af07fbb5ff514cf356bec40d1313e8408afc98f5bbf10be56a47ad8208e50c",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "structure.png",
+      "state": "analysis.structure",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:03:09.944859+00:00",
+      "sha256": "6e9632f26f9b72b3ce634f5dc932363090bbd1e5975826545198b9b8043f418a",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "risks.png",
+      "state": "analysis.risks",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:03:13.762962+00:00",
+      "sha256": "0c52ea76752eb1c28b93e1ad8086e09da0de0db1ccb34987723f00fe68af7e9f",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "traceability.png",
+      "state": "checks.compliance",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:03:17.493490+00:00",
+      "sha256": "824918f215f8caf5bdffda666be711c0f71923501fb8b5c6cb73d2767600b03a",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "changes.png",
+      "state": "risk.partial",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:03:21.241070+00:00",
+      "sha256": "2bcecbbe8bfa78ab179a991574a41b88fec6b8552b87c8da3889e946641b5786",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "languages-fr.png",
+      "state": "languages.french",
+      "language": "fr",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:03:24.767881+00:00",
+      "sha256": "91fb7d9e55471236b2663909570ef451158face722d57830abbc9a8690f51984",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "radar-fr.png",
+      "state": "risk.french",
+      "language": "fr",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:03:28.484190+00:00",
+      "sha256": "c053619503b74bb698d0a3ca243bb863cf3b4c07dd8cfb5824d56a1753b0953c",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "history.png",
+      "state": "focus:history",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:09:07.343233+00:00",
+      "sha256": "563ab40d2fc7cdb93b708aafb617bfdedcf06635f60d22521fdcf73cb111ac26",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "disktree.png",
+      "state": "focus:statistics",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T21:09:10.521062+00:00",
+      "sha256": "2c27c8dea74f348ed5947d4fad289040a493549bdf634a20e7dac21e0872f159",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Native application window capture",
+      "pixels": [
+        2350,
+        2218
+      ]
+    },
+    {
+      "image": "tui-inbox.svg",
+      "state": "inbox",
+      "language": "en",
+      "source_revision": "7d9617a",
+      "captured_at": "2026-11-07T21:12:12.576121+00:00",
+      "sha256": "c766472f01ad0ff26cb11a0348053ce73fbaea2bf63e83b394a738aaf2469141",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "SVG export of actual Ratatui TestBackend cells",
+      "cells": [
+        140,
+        44
+      ]
+    },
+    {
+      "image": "tui-radar.svg",
+      "state": "radar",
+      "language": "en",
+      "source_revision": "7d9617a",
+      "captured_at": "2026-11-07T21:12:12.904170+00:00",
+      "sha256": "66ce9826619003123d3b3615f0427981b42187eb2927562409cf095e27c7cf84",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "SVG export of actual Ratatui TestBackend cells",
+      "cells": [
+        140,
+        44
+      ]
+    },
+    {
+      "image": "tui-languages-fr.svg",
+      "state": "settings",
+      "language": "fr",
+      "source_revision": "7d9617a",
+      "captured_at": "2026-11-07T21:12:13.224468+00:00",
+      "sha256": "b7477151504687d82483d4a176024ecd542a9e80d761f7689429181f7d292be8",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "SVG export of actual Ratatui TestBackend cells",
+      "cells": [
+        140,
+        44
+      ]
+    },
+    {
+      "image": "tui-radar-compact.svg",
+      "state": "radar",
+      "language": "fr",
+      "source_revision": "7d9617a",
+      "captured_at": "2026-11-07T21:12:13.487595+00:00",
+      "sha256": "00dd760bf05c494dd6589f77ad9a99072b390aac6e8567a569caa73880e8c78d",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "SVG export of actual Ratatui TestBackend cells",
+      "cells": [
+        80,
+        24
+      ]
+    },
+    {
+      "image": "claude-radar-session.svg",
+      "state": "recorded-claude-response",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T20:57:50.134135+00:00",
+      "sha256": "7f187daffc38d85e5a8c132bf1dccc2b36376802311a61fa747cc18fe77f2d15",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Rendered final response of a real Claude Code CLI session"
+    },
+    {
+      "image": "claude-radar.svg",
+      "state": "standalone-radar",
+      "language": "en",
+      "source_revision": "0c8aabc",
+      "captured_at": "2026-11-07T20:57:50.426876+00:00",
+      "sha256": "6f250ee23523f6e7647d2b8c2fe10a2ace5bde534e107d639665a30c1a8902b6",
+      "synthetic_data": true,
+      "review": "Visually inspected for visible clipping, overlap and readability by Codex; not an approved pixel baseline.",
+      "method": "Actual standalone CLI SVG export"
+    }
+  ]
+}

@@ -6,9 +6,11 @@ binary); the other crates hold domain logic and adapters, independent of the UI.
 | Crate | Role |
 |---|---|
 | `crates/mrde-radar` | Public headless scan service and text/JSON/SVG CLI, sharing `mrde-risk`; see [CLI architecture](radar-cli.md). |
-| `crates/mrde-app` | GPUI views, theme, settings, application composition, UI preview and screenshot harness. |
+| `crates/mrde-app` | GPUI presentation, native terminal integration and screenshot harness. |
+| `crates/mrde-tui` | Ratatui presentation, input/effect state, async worker adapter and deterministic buffer exports. |
+| `crates/mrde-service` | Frontend-independent executors, project catalog, connection/language settings, shared cache orchestration and demo fixtures. |
 | `crates/mrde-core` | Serializable domain models, queue scoring, review orchestration ports, analysis result models. |
-| `crates/mrde-forge` | `Forge` trait and the GitLab REST API v4 adapter. |
+| `crates/mrde-forge` | `Forge` trait and GitLab REST / GitHub REST and GraphQL adapters. |
 | `crates/mrde-git` | Dedicated bare repositories, detached worktrees, and read-only Git queries using the system `git`. |
 | `crates/mrde-insights` | Worktree analysis (symbols, impact, file graph, history, contracts, dependencies, patterns) and screenshot comparison. |
 | `crates/mrde-claude` | Claude Code CLI bridge with strict response parsing, prompts, and the questions context. |
@@ -19,40 +21,25 @@ binary); the other crates hold domain logic and adapters, independent of the UI.
 
 ```mermaid
 flowchart TD
-    App["mrde-app: GPUI views and composition"] --> Core["mrde-core: models, scoring, review orchestration"]
-    App --> Projects["Project catalog: active ID, provider, scoped configuration"]
-    Projects --> Forge["mrde-forge: Forge trait and GitLab adapter"]
-    App --> Git["mrde-git: worktrees and read-only Git queries"]
-    App --> Insights["mrde-insights: symbols, impact, history, contracts, patterns, screenshots"]
-    Insights --> Git
-    Insights --> Core
-    App --> Claude["mrde-claude: CLI bridge and parsing"]
-    App --> Resolver["mrde-resolver: bounded repair loop"]
-    Resolver --> Forge
-    Resolver --> Git
-    Resolver --> Claude
-    Resolver --> Store
-    App --> Embedded["Embedded Ghostty terminal (Metal)"]
-    App --> Store["mrde-store: SQLite and Keychain"]
-    App --> Risk["mrde-risk: local scorers"]
-    Risk --> Git
-    Risk --> Core
-    Risk --> Checks["mrde-checks: bounded runner"]
-    Forge --> Core
-    Git --> Core
-    Claude --> Core
-    Store --> Core
-    Forge --> GitLab["GitLab REST v4 (+ Cloudflare Access headers)"]
-    Git --> SSH["git with the user's SSH configuration"]
-    Claude --> CLI["Claude Code CLI"]
-    Store --> SQLite[(SQLite)]
-    Store --> Keychain["macOS Keychain"]
+    App[GPUI desktop] --> Service[mrde-service: application services]
+    TUI[Ratatui terminal] --> Service
+    Service --> Core[mrde-core: models, language preferences, orchestration]
+    Service --> Forge[mrde-forge: GitLab / GitHub]
+    Service --> Git[mrde-git: isolated worktrees]
+    Service --> Claude[mrde-claude: explicit CLI requests]
+    Service --> Store[SQLite and Keychain]
+    Service --> Risk[mrde-risk: bounded local scorers]
+    Service --> Insights[mrde-insights: history and analysis]
+    Service --> Resolver[mrde-resolver: bounded repairs]
+    Risk --> Checks[mrde-checks: command executor]
+    CLI[mrde-radar: public scan API and CLI] --> Risk
+    Plugin[Claude plugin: /mrde:radar] --> CLI
 ```
 
 ## Project boundaries
 
 `Config` carries a stable project ID, display name, `Provider`, URL, and optional group.
-`mrde-app::projects` loads a versioned `projects.toml`, importing the former single connection
+`mrde-service::projects` loads a versioned `projects.toml`, importing the former single connection
 when needed. Saves use a serialized read-modify-write and atomic rename, so saving preferences
 for an older project cannot replace the active project. Unknown fields and duplicate IDs fail
 validation; secrets never enter this model.
@@ -88,7 +75,7 @@ states. Large Markdown documents use a bounded virtualized viewport; the Files t
 only visible rows and uses an indexed statistics lookup.
 
 `mrde-core::review::ReviewServices` keeps review orchestration independent of concrete
-adapters; the `Forge` trait stays in `mrde-forge` and the application composes both.
+adapters; the `Forge` trait stays in `mrde-forge` and `mrde-service` composes both. The two frontends inject the same executor and settings ports.
 
 ```mermaid
 sequenceDiagram
@@ -269,3 +256,10 @@ sequenceDiagram
     User->>Claude: Answer or edit interactively
     User->>UI: Close terminal, Resume
 ```
+
+
+Language preferences live once in the project catalog and are injected into runtime
+configuration. They do not change credential or technical-risk cache namespaces. Claude
+review/tour keys include the information language. Switching information language clears
+incompatible visible AI results but never runs Claude automatically. Both UIs share the
+immutable French catalog in `mrde-core`; source repository content is not translated.

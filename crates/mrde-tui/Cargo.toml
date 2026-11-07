@@ -1,0 +1,25 @@
+[package]
+name = "mrde-tui"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+mrde-core.workspace = true
+mrde-service.workspace = true
+mrde-git.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "unstable-rendered-line-info"] }
+clap = { version = "4", features = ["derive"] }
+markdown = "1.0.0"
+
+[dev-dependencies]
+async-trait.workspace = true
+tempfile = "3"

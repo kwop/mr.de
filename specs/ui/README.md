@@ -89,3 +89,17 @@ For a new component, add default, focused, disabled, loading, empty, error and s
 where applicable. The present catalog covers existing stable previews; transient states are
 currently exercised by [GPUI interaction tests](../../crates/mrde-app/src/ui/tests.rs), not
 frozen as screenshot stories. Add stable fixtures before introducing pixel regression tests.
+
+## Terminal and bilingual references
+
+The Ratatui frontend renders the same application services in terminal cells. Run
+`cargo run --locked -p mrde-tui -- --demo`; use `--screen radar --snapshot /tmp/tui.svg`
+to export its actual buffer. Validate 80×24, 100×32 and 140×44 layouts, both languages,
+label contrast, scrolling, partial measurements and exact-SHA confirmation. A narrow
+radar switches to a scrollable measurement list rather than clipping the chart.
+
+Use native stories `languages.french` and `risk.french` for translated desktop controls.
+Every product change updates its Gherkin contract and affected synthetic screen reference.
+Published references and their provenance are in [docs/images](../../docs/images/README.md).
+The [Claude example](../../docs/examples/claude-radar.md) is a recorded real response,
+clearly distinguished from native and terminal-renderer captures.

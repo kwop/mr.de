@@ -54,13 +54,13 @@ impl Part {
         }
     }
     fn title(self) -> &'static str {
-        match self {
+        crate::i18n::t(match self {
             Self::Review => "PRE-REVIEW",
             Self::Checks => "CHECKS",
             Self::Analysis => "ANALYSIS",
             Self::Ticket => "TICKET",
             Self::Approvals => "APPROVALS",
-        }
+        })
     }
     fn icon(self) -> IconName {
         match self {
@@ -89,12 +89,12 @@ fn severity_color(severity: &Severity) -> u32 {
     }
 }
 fn severity_label(severity: &Severity) -> &'static str {
-    match severity {
+    crate::i18n::t(match severity {
         Severity::Critical => "critical",
         Severity::High => "high",
         Severity::Medium => "medium",
         Severity::Low => "low",
-    }
+    })
 }
 /// `project#12` from an issue or work item link.
 fn ticket_reference(url: &str) -> String {
@@ -118,13 +118,13 @@ fn row(label: impl Into<SharedString>, value: impl Into<SharedString>, color: u3
                 .min_w_0()
                 .one_line()
                 .text_color(rgb(MUTED))
-                .child(ellipsis(label.into())),
+                .child(ellipsis(crate::i18n::text(&label.into()))),
         )
         .child(
             div()
                 .flex_shrink_0()
                 .text_color(rgb(color))
-                .child(value.into()),
+                .child(crate::i18n::text(&value.into())),
         )
 }
 
@@ -281,7 +281,7 @@ impl Cockpit {
                     Button::new("context-expand")
                         .ghost()
                         .icon(IconName::ChevronLeft)
-                        .tooltip("Show review context (⌘⌥B)")
+                        .tooltip(crate::i18n::t("Show review context (⌘⌥B)"))
                         .on_click(cx.listener(|this, _, _, cx| this.set_context(true, cx))),
                 ),
             )
@@ -321,7 +321,7 @@ impl Cockpit {
                     .text_size(px(12.))
                     .font_weight(FontWeight::NORMAL)
                     .text_color(rgb(color))
-                    .child(text)
+                    .child(crate::i18n::text(&text))
             }))
             .when_some(part.tab(), |header, tab| {
                 header
@@ -350,7 +350,9 @@ impl Cockpit {
         let Some(review) = &self.review else {
             return self.context_section(
                 Part::Review,
-                muted("Not run for this commit. Run a review from the toolbar."),
+                muted(crate::i18n::t(
+                    "Not run for this commit. Run a review from the toolbar.",
+                )),
                 None,
                 cx,
             );
@@ -379,16 +381,20 @@ impl Cockpit {
             );
         }
         if risks.is_empty() {
-            body = body.child(muted("No risk found."));
+            body = body.child(muted(crate::i18n::t("No risk found.")));
         } else if risks.len() > 3 {
-            body = body.child(muted(format!("{} more in Pre-review", risks.len() - 3)));
+            body = body.child(muted(crate::tr!(
+                "{value0} more in Pre-review",
+                value0 = risks.len() - 3
+            )));
         }
-        let meta = format!(
-            "{}{:.0}% confident",
-            self.review_level
-                .map(|level| format!("{} · ", level.label()))
+        let meta = crate::tr!(
+            "{value0}{value1}% confident",
+            value0 = self
+                .review_level
+                .map(|level| format!("{} · ", crate::i18n::t(level.label())))
                 .unwrap_or_default(),
-            review.confidence * 100.
+            value1 = format!("{:.0}", review.confidence * 100.)
         );
         self.context_section(Part::Review, body, Some((meta, MUTED)), cx)
     }
@@ -460,7 +466,9 @@ impl Cockpit {
         let Some(insights) = self.current_insights() else {
             return self.context_section(
                 Part::Analysis,
-                muted("Not analyzed yet. Click Analyze in the toolbar."),
+                muted(crate::i18n::t(
+                    "Not analyzed yet. Click Analyze in the toolbar.",
+                )),
                 None,
                 cx,
             );
@@ -519,7 +527,7 @@ impl Cockpit {
         let tickets = primary_tickets(&detail.mr, &detail.issues);
         let mut body = div().flex().flex_col().gap_3();
         if tickets.is_empty() {
-            body = body.child(muted("No linked ticket."));
+            body = body.child(muted(crate::i18n::t("No linked ticket.")));
         }
         for (index, ticket) in tickets.into_iter().take(2).enumerate() {
             let url = ticket.web_url.clone();
@@ -553,7 +561,8 @@ impl Cockpit {
                         ),
                     )
                     .tooltip(|window, cx| {
-                        Tooltip::new("Open the ticket in the browser").build(window, cx)
+                        Tooltip::new(crate::i18n::t("Open the ticket in the browser"))
+                            .build(window, cx)
                     })
                     .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))),
             );
@@ -566,7 +575,7 @@ impl Cockpit {
             None => ("Unavailable".to_string(), MUTED),
             Some(0) => ("None yet".to_string(), INK),
             Some(1) => ("1 approval".to_string(), SUCCESS),
-            Some(n) => (format!("{n} approvals"), SUCCESS),
+            Some(n) => (crate::tr!("{n} approvals", n = n), SUCCESS),
         };
         let body = div()
             .flex()
@@ -591,7 +600,7 @@ impl Cockpit {
             .flex_col()
             .gap_2();
         match &self.detail {
-            None => body = body.child(muted("Loading merge request…")),
+            None => body = body.child(muted(crate::i18n::t("Loading merge request…"))),
             Some(detail) => {
                 body = body
                     .child(self.review_part(cx))
@@ -633,7 +642,7 @@ impl Cockpit {
                             .flex_1()
                             .text_color(rgb(HEADING))
                             .font_weight(FontWeight::MEDIUM)
-                            .child("Review context"),
+                            .child(crate::i18n::t("Review context")),
                     )
                     .child(
                         div().debug_selector(|| "context-close".into()).child(
@@ -641,7 +650,7 @@ impl Cockpit {
                                 .ghost()
                                 .small()
                                 .icon(IconName::ChevronRight)
-                                .tooltip("Hide review context (⌘⌥B)")
+                                .tooltip(crate::i18n::t("Hide review context (⌘⌥B)"))
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.set_context(false, cx)),
                                 ),

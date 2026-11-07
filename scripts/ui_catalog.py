@@ -18,12 +18,12 @@ CATALOG = ROOT / 'specs/ui/catalog.toml'
 ENV_KEYS = {
     'MRDE_SCENARIO_MR', 'MRDE_SCENARIO_FRESH', 'MRDE_SCENARIO_RISK',
     'MRDE_SCENARIO_SCROLL', 'MRDE_SCENARIO_CONTEXT', 'MRDE_SCENARIO_SEARCH',
-    'MRDE_SCENARIO_LABEL', 'MRDE_SCENARIO_AXIS', 'MRDE_SCENARIO_FILE', 'MRDE_WINDOW',
+    'MRDE_LANGUAGE', 'MRDE_SCENARIO_LABEL', 'MRDE_SCENARIO_AXIS', 'MRDE_SCENARIO_FILE', 'MRDE_WINDOW',
 }
 TABS = {'description', 'changes', 'files', 'review', 'statistics', 'checks',
         'structure', 'history', 'risks', 'visual'}
 SCENARIOS = {'queue', 'projects', 'settings', 'settings:github', 'worktrees',
-             'logs', 'open', 'confirm', 'image', 'image:zoom', 'image:max', 'threads', 'threads:closed'}
+             'settings:languages', 'logs', 'open', 'confirm', 'image', 'image:zoom', 'image:max', 'threads', 'threads:closed'}
 SCENARIOS |= {f'{mode}:{tab}' for mode in ('focus', 'detail') for tab in TABS}
 
 

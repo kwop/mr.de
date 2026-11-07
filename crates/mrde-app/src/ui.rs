@@ -1,4 +1,5 @@
 use crate::backend::{self, Action, Executor, Outcome};
+use crate::i18n::{t, text};
 use crate::{
     settings::{self, ConnectionSettings, Draft, SettingsService},
     theme::*,
@@ -43,6 +44,11 @@ pub struct Cockpit {
     settings_operation: Option<SettingsOperation>,
     feedback: String,
     feedback_error: bool,
+    language_draft: mrde_core::language::Languages,
+    language_saving: bool,
+    language_page: bool,
+    rendered_language: Option<mrde_core::language::Language>,
+    language_feedback: String,
     logs_open: bool,
     logs_copied: bool,
     logs: std::collections::VecDeque<String>,
@@ -217,12 +223,15 @@ impl Cockpit {
                             config.gitlab_url.is_empty() || !config.provider.available();
                         this.threads
                             .update(cx, |threads, cx| threads.configure(config.clone(), cx));
+                        this.language_draft = config.languages;
+                        gpui_component::set_locale(config.languages.interface.code());
                         this.config = config;
                         this.queue = queue;
                         this.status = status;
                     }
                     Err(error) => {
-                        this.status = format!("Could not load local settings: {error}");
+                        this.status =
+                            crate::tr!("Could not load local settings: {error}", error = error);
                         this.settings = true;
                     }
                 }
@@ -241,46 +250,52 @@ impl Cockpit {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let project_name = cx.new(|cx| InputState::new(window, cx).placeholder("Project name"));
+        let project_name =
+            cx.new(|cx| InputState::new(window, cx).placeholder(crate::i18n::t("Project name")));
         project_name.update(cx, |s, cx| s.set_value(config.name.clone(), window, cx));
-        let project_group = cx.new(|cx| InputState::new(window, cx).placeholder("All groups"));
+        let project_group =
+            cx.new(|cx| InputState::new(window, cx).placeholder(crate::i18n::t("All groups")));
         project_group.update(cx, |s, cx| s.set_value(config.group.clone(), window, cx));
         let project_refresh = cx.new(|cx| InputState::new(window, cx).placeholder("120"));
         project_refresh.update(cx, |s, cx| {
             s.set_value(config.refresh_seconds.to_string(), window, cx)
         });
-        let project_claude = cx.new(|cx| InputState::new(window, cx).placeholder("claude"));
+        let project_claude =
+            cx.new(|cx| InputState::new(window, cx).placeholder(crate::i18n::t("claude")));
         project_claude.update(cx, |s, cx| {
             s.set_value(config.claude_path.clone(), window, cx)
         });
-        let url =
-            cx.new(|cx| InputState::new(window, cx).placeholder("https://gitlab.example.com"));
+        let url = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(crate::i18n::t("https://gitlab.example.com"))
+        });
         url.update(cx, |input, cx| {
             input.set_value(config.gitlab_url.clone(), window, cx)
         });
         let token = cx.new(|cx| {
             InputState::new(window, cx)
                 .masked(true)
-                .placeholder("Personal access token")
+                .placeholder(crate::i18n::t("Personal access token"))
         });
         let cf_id = cx.new(|cx| {
             InputState::new(window, cx)
                 .masked(true)
-                .placeholder("CF-Access-Client-Id (optional)")
+                .placeholder(crate::i18n::t("CF-Access-Client-Id (optional)"))
         });
         let cf_secret = cx.new(|cx| {
             InputState::new(window, cx)
                 .masked(true)
-                .placeholder("CF-Access-Client-Secret (optional)")
+                .placeholder(crate::i18n::t("CF-Access-Client-Secret (optional)"))
         });
-        let spec_path =
-            cx.new(|cx| InputState::new(window, cx).placeholder("~/code/my-project/specs"));
+        let spec_path = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(crate::i18n::t("~/code/my-project/specs"))
+        });
         spec_path.update(cx, |input, cx| {
             input.set_value(config.spec_path.clone(), window, cx)
         });
         let visual_command = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("pnpm --dir frontend exec playwright test visual")
+            InputState::new(window, cx).placeholder(crate::i18n::t(
+                "pnpm --dir frontend exec playwright test visual",
+            ))
         });
         visual_command.update(cx, |input, cx| {
             input.set_value(config.visual_command.clone(), window, cx)
@@ -306,12 +321,13 @@ impl Cockpit {
         });
         let search = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Search merge requests, authors, labels")
+                .placeholder(crate::i18n::t("Search merge requests, authors, labels"))
                 .clean_on_escape()
         });
         let open_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("https://gitlab.example.com/group/project/-/merge_requests/123")
+            InputState::new(window, cx).placeholder(crate::i18n::t(
+                "https://gitlab.example.com/group/project/-/merge_requests/123",
+            ))
         });
         let subscriptions = vec![
             cx.subscribe(&search, |this: &mut Self, input, event: &InputEvent, cx| {
@@ -354,6 +370,11 @@ impl Cockpit {
             settings_operation: None,
             feedback: String::new(),
             feedback_error: false,
+            language_draft: config.languages,
+            language_saving: false,
+            language_page: false,
+            rendered_language: None,
+            language_feedback: String::new(),
             logs_open: false,
             logs_copied: false,
             logs: Default::default(),
@@ -427,7 +448,7 @@ impl Cockpit {
     }
     /// Refresh is background work: only an explicit operation locks its controls.
     fn is_busy(&self) -> bool {
-        self.initializing || (self.job.is_some() && !self.refreshing)
+        self.initializing || self.language_saving || (self.job.is_some() && !self.refreshing)
     }
     fn interrupt_refresh(&mut self) {
         if !self.refreshing {
@@ -717,8 +738,10 @@ impl Cockpit {
                     }
                 }
                 Ok(Outcome::ConnectionTested(user)) => {
-                    self.feedback =
-                        format!("Connected as {user}. Test passed — settings have not been saved.");
+                    self.feedback = crate::tr!(
+                        "Connected as {user}. Test passed — settings have not been saved.",
+                        user = user
+                    );
                     self.feedback_error = false;
                     self.status = "Connection test passed".into();
                     self.log("OK  Connection test passed; no settings written");
@@ -769,10 +792,10 @@ impl Cockpit {
                         self.review = None;
                         self.confirm = false;
                     }
-                    self.status = format!(
-                        "{} open merge requests · updated {}",
-                        queue.len(),
-                        chrono::Local::now().format("%H:%M:%S")
+                    self.status = crate::tr!(
+                        "{value0} open merge requests · updated {value1}",
+                        value0 = queue.len(),
+                        value1 = chrono::Local::now().format("%H:%M:%S")
                     );
                     self.queue = queue;
                     self.set_queue_page(self.queue_page);
@@ -808,11 +831,11 @@ impl Cockpit {
                     self.apply_detail(detail, review);
                 }
                 Ok(Outcome::Insights(id, insights)) => {
-                    self.status = format!(
-                        "Analysis ready: {} symbols, {} contracts, {} patterns.",
-                        insights.symbols.len(),
-                        insights.contracts.len(),
-                        insights.patterns.len()
+                    self.status = crate::tr!(
+                        "Analysis ready: {value0} symbols, {value1} contracts, {value2} patterns.",
+                        value0 = insights.symbols.len(),
+                        value1 = insights.contracts.len(),
+                        value2 = insights.patterns.len()
                     );
                     for warning in &insights.warnings {
                         self.log(&format!("WARN  {warning}"));
@@ -829,13 +852,18 @@ impl Cockpit {
                     }
                 }
                 Ok(Outcome::Tour(id, sha, tour)) => {
-                    self.status = format!("Guided tour ready: {} steps.", tour.steps.len());
+                    self.status = crate::tr!(
+                        "Guided tour ready: {value0} steps.",
+                        value0 = tour.steps.len()
+                    );
                     self.tour = Some((id, sha, tour));
                     self.show_detail_tab(DetailTab::Structure);
                 }
                 Ok(Outcome::Visual(id, sha, report)) => {
-                    self.status =
-                        format!("Screenshots compared: {} screens.", report.screens.len());
+                    self.status = crate::tr!(
+                        "Screenshots compared: {value0} screens.",
+                        value0 = report.screens.len()
+                    );
                     self.visual = Some((id, sha, report));
                     self.show_detail_tab(DetailTab::Visual);
                 }
@@ -846,10 +874,13 @@ impl Cockpit {
                     self.show_detail_tab(DetailTab::Review);
                     self.review = Some(review);
                     self.review_level = Some(level);
-                    self.status = format!("{} review ready.", level.label());
+                    self.status = crate::tr!("{value0} review ready.", value0 = level.label());
                 }
                 Ok(Outcome::Statistics(id, stats)) => {
-                    self.status = format!("Statistics ready: {} files.", stats.files.len());
+                    self.status = crate::tr!(
+                        "Statistics ready: {value0} files.",
+                        value0 = stats.files.len()
+                    );
                     self.stats = Some((id, stats));
                     self.show_detail_tab(DetailTab::Statistics);
                 }
@@ -859,8 +890,9 @@ impl Cockpit {
                     self.show_detail_tab(DetailTab::Checks);
                 }
                 Ok(Outcome::Worktrees(worktrees, message)) => {
-                    self.status =
-                        message.unwrap_or_else(|| format!("{} worktrees.", worktrees.len()));
+                    self.status = message.unwrap_or_else(|| {
+                        crate::tr!("{value0} worktrees.", value0 = worktrees.len())
+                    });
                     self.worktrees = worktrees;
                 }
                 Ok(Outcome::Approved(id, count)) => {
@@ -882,7 +914,10 @@ impl Cockpit {
                         );
                     }
                     self.confirm = false;
-                    self.status = format!("Approved on {}.", self.config.provider.label());
+                    self.status = crate::tr!(
+                        "Approved on {value0}.",
+                        value0 = self.config.provider.label()
+                    );
                 }
                 Ok(Outcome::Ask(ready)) => {
                     // The thread belongs to its own MR; only show it if that MR is still open.
@@ -896,7 +931,8 @@ impl Cockpit {
                         self.worktrees_view = false;
                         self.status = "Claude Code is open in Threads, read-only.".into();
                     } else {
-                        self.status = format!("Claude Code is ready in Threads for !{iid}.");
+                        self.status =
+                            crate::tr!("Claude Code is ready in Threads for !{iid}.", iid = iid);
                     }
                 }
                 Ok(Outcome::Done(message)) => {
@@ -1001,9 +1037,9 @@ impl Cockpit {
         }
         self.last_refresh = Instant::now();
         let generation = self.generation;
-        let message = format!(
-            "Refreshing {} merge requests…",
-            self.config.provider.label()
+        let message = crate::tr!(
+            "Refreshing {value0} merge requests…",
+            value0 = self.config.provider.label()
         );
         self.start(Action::Refresh, &message, cx);
         if self.generation != generation {
@@ -1086,7 +1122,7 @@ impl Cockpit {
                     Button::new("previous-page")
                         .small()
                         .ghost()
-                        .label("Previous")
+                        .label(crate::i18n::t("Previous"))
                         .disabled(disabled || self.queue_page == 0)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.set_queue_page(this.queue_page.saturating_sub(1));
@@ -1099,7 +1135,7 @@ impl Cockpit {
                     Button::new("next-page")
                         .small()
                         .ghost()
-                        .label("Next")
+                        .label(crate::i18n::t("Next"))
                         .disabled(disabled || self.queue_page + 1 >= self.queue_page_count())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.set_queue_page(this.queue_page + 1);
@@ -1125,7 +1161,7 @@ impl Cockpit {
                             .small()
                             .ghost()
                             .rounded(px(RADIUS_CHIP + 1.))
-                            .label(role.label())
+                            .label(crate::i18n::t(role.label()))
                             .when(checked, |b| b.bg(rgb(SELECTED)).text_color(rgb(HEADING)))
                             .disabled(disabled || (checked && self.config.mr_roles.len() == 1))
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -1162,8 +1198,8 @@ impl Cockpit {
                             .small()
                             .ghost()
                             .rounded(px(RADIUS_CHIP + 1.))
-                            .label(label)
-                            .tooltip(sort.label())
+                            .label(t(label))
+                            .tooltip(t(sort.label()))
                             .when(self.config.mr_sort == sort, |b| {
                                 b.bg(rgb(SELECTED)).text_color(rgb(HEADING))
                             })
@@ -1204,7 +1240,7 @@ impl Cockpit {
                                 div()
                                     .text_color(rgb(HEADING))
                                     .font_weight(FontWeight::MEDIUM)
-                                    .child("Merge requests"),
+                                    .child(crate::i18n::t("Merge requests")),
                             )
                             .child(
                                 div()
@@ -1212,13 +1248,13 @@ impl Cockpit {
                                     .text_size(px(12.))
                                     .text_color(rgb(MUTED))
                                     .child(if self.filter.is_active() {
-                                        format!(
-                                            "{} of {} open",
-                                            self.visible_queue().len(),
-                                            self.queue.len()
+                                        crate::tr!(
+                                            "{value0} of {value1} open",
+                                            value0 = self.visible_queue().len(),
+                                            value1 = self.queue.len()
                                         )
                                     } else {
-                                        format!("{} open", self.queue.len())
+                                        crate::tr!("{value0} open", value0 = self.queue.len())
                                     }),
                             )
                             .when(self.filter.is_active(), |row| {
@@ -1228,7 +1264,7 @@ impl Cockpit {
                                             .small()
                                             .ghost()
                                             .icon(IconName::Close)
-                                            .label("Clear filters")
+                                            .label(crate::i18n::t("Clear filters"))
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.clear_filters(window, cx)
                                             })),
@@ -1249,7 +1285,7 @@ impl Cockpit {
                                 .small()
                                 .ghost()
                                 .icon(IconName::Redo)
-                                .label("Refresh")
+                                .label(crate::i18n::t("Refresh"))
                                 .loading(self.refreshing)
                                 .disabled(disabled || self.refreshing)
                                 .on_click(cx.listener(|this, _, _, cx| this.refresh(false, cx))),
@@ -1272,7 +1308,7 @@ impl Cockpit {
                                 div()
                                     .text_size(px(12.))
                                     .text_color(rgb(MUTED))
-                                    .child("Show"),
+                                    .child(crate::i18n::t("Show")),
                             )
                             .child(roles),
                     )
@@ -1285,7 +1321,7 @@ impl Cockpit {
                                 div()
                                     .text_size(px(12.))
                                     .text_color(rgb(MUTED))
-                                    .child("Sort"),
+                                    .child(crate::i18n::t("Sort")),
                             )
                             .child(sorts),
                     ),
@@ -1293,6 +1329,22 @@ impl Cockpit {
             .into_any_element()
     }
     fn settings_view(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.language_page {
+            return div()
+                .id("language-settings-page")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .child(
+                    div()
+                        .max_w(px(920.))
+                        .px(px(56.))
+                        .py(px(42.))
+                        .child(self.language_settings(cx)),
+                )
+                .into_any_element();
+        }
+
         let busy = self.initializing || self.settings_operation.is_some();
         let row = |label: &'static str, hint: &'static str, control: AnyElement| {
             div()
@@ -1309,8 +1361,8 @@ impl Cockpit {
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .child(label)
-                        .child(div().text_sm().text_color(rgb(MUTED)).child(hint)),
+                        .child(t(label))
+                        .child(div().text_sm().text_color(rgb(MUTED)).child(t(hint))),
                 )
                 .child(div().w(px(340.)).flex_shrink_0().child(control))
         };
@@ -1335,30 +1387,30 @@ impl Cockpit {
             )
         };
         let content = div().w_full().max_w(px(920.)).px(px(56.)).py(px(42.)).flex().flex_col()
-            .child(div().text_size(px(20.)).text_color(rgb(HEADING)).font_weight(FontWeight::MEDIUM).mb_2().child(if self.editing_project.is_some() { "New project" } else { "Project settings" }))
-            .child(div().text_sm().text_color(rgb(MUTED)).mb_8().child("Connect your review workspace."))
+            .child(div().text_size(px(20.)).text_color(rgb(HEADING)).font_weight(FontWeight::MEDIUM).mb_2().child(if self.editing_project.is_some() { crate::i18n::t("New project") } else { crate::i18n::t("Project settings") }))
+            .child(div().text_sm().text_color(rgb(MUTED)).mb_8().child(crate::i18n::t("Connect your review workspace.")))
             .child(field("Project name", "A name for this review workspace.", &self.project_name, "project-name"))
             .child(row("Provider", "Choose the service that hosts your code.", self.provider_control(cx)))
-            .when(self.draft_provider == mrde_core::config::Provider::Github, |d| d.child(div().debug_selector(|| "github-hint".into()).text_sm().text_color(rgb(MUTED)).pb_4().child("Use https://github.com or your GitHub Enterprise Server address. The token needs read access to pull requests, contents, issues, and checks, and write access to pull requests to approve.")))
+            .when(self.draft_provider == mrde_core::config::Provider::Github, |d| d.child(div().debug_selector(|| "github-hint".into()).text_sm().text_color(rgb(MUTED)).pb_4().child(crate::i18n::t("Use https://github.com or your GitHub Enterprise Server address. The token needs read access to pull requests, contents, issues, and checks, and write access to pull requests to approve."))))
             .child(field("Instance URL", "The base URL of your forge.", &self.url, "gitlab-url"))
             .child(field("Group / organization", if self.draft_provider == mrde_core::config::Provider::Github { "Optional owner or repository, for example acme or acme/platform." } else { "Optional path, for example team/platform. GitLab includes subgroups." }, &self.project_group, "project-group"))
             .child(field("Refresh interval", "Seconds between refreshes, at least 30.", &self.project_refresh, "project-refresh"))
             .child(field("Claude executable", "Command or full path to Claude Code.", &self.project_claude, "project-claude"))
             .child(field("Personal access token", "API access for merge requests and approvals.", &self.token, "gitlab-token"))
-            .child(div().text_sm().text_color(rgb(MUTED)).pb_6().child("Leave a secret blank to keep its saved value. Entered values remain visible as masked text."))
+            .child(div().text_sm().text_color(rgb(MUTED)).pb_6().child(crate::i18n::t("Leave a secret blank to keep its saved value. Entered values remain visible as masked text.")))
             .child(div().h(px(1.)).bg(rgb(LINE)).my_3())
-            .child(div().text_size(px(15.)).text_color(rgb(HEADING)).font_weight(FontWeight::MEDIUM).mt_6().mb_2().child("Compliance"))
+            .child(div().text_size(px(15.)).text_color(rgb(HEADING)).font_weight(FontWeight::MEDIUM).mt_6().mb_2().child(crate::i18n::t("Compliance")))
             .child(field("Specification folder", "Folder searched by the compliance check, for example my-project/specs.", &self.spec_path, "spec-path"))
             .child(field("Screenshot command", "Optional. Runs in the base and MR worktrees and writes PNG files to $MRDE_SCREENSHOTS_DIR for the visual comparison.", &self.visual_command, "visual-command"))
             // Cloudflare Access service tokens are sent to GitLab instances only.
             .when(self.draft_provider == mrde_core::config::Provider::Gitlab, |d| d
             .child(div().h(px(1.)).bg(rgb(LINE)).my_3())
-            .child(div().text_size(px(15.)).text_color(rgb(HEADING)).font_weight(FontWeight::MEDIUM).mt_6().mb_2().child("Cloudflare Access"))
-            .child(div().text_sm().text_color(rgb(MUTED)).mb_2().child("Optional service token for instances behind Zero Trust."))
+            .child(div().text_size(px(15.)).text_color(rgb(HEADING)).font_weight(FontWeight::MEDIUM).mt_6().mb_2().child(crate::i18n::t("Cloudflare Access")))
+            .child(div().text_sm().text_color(rgb(MUTED)).mb_2().child(crate::i18n::t("Optional service token for instances behind Zero Trust.")))
             .child(field("Client ID", "CF-Access-Client-Id", &self.cf_id, "cf-id"))
             .child(field("Client secret", "CF-Access-Client-Secret", &self.cf_secret, "cf-secret"))
             .child(div().flex().justify_end().pb_5().child(Button::new("clear-cf").ghost().small()
-                .label(if self.clear_cloudflare { "Undo removal of saved Cloudflare credentials" } else { "Remove saved Cloudflare credentials" })
+                .label(if self.clear_cloudflare { crate::i18n::t("Undo removal of saved Cloudflare credentials") } else { crate::i18n::t("Remove saved Cloudflare credentials") })
                 .disabled(busy).on_click(cx.listener(|this, _, _, cx| { this.clear_cloudflare = !this.clear_cloudflare; cx.notify(); })))))
             ;
         let mut controls = div()
@@ -1375,7 +1427,7 @@ impl Cockpit {
                     .child(
                         div().debug_selector(|| "test-connection".into()).child(
                             Button::new("test-connection")
-                                .label("Test connection")
+                                .label(crate::i18n::t("Test connection"))
                                 .loading(self.settings_operation == Some(SettingsOperation::Test))
                                 .disabled(self.is_busy() || !self.draft_provider.available())
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1387,7 +1439,7 @@ impl Cockpit {
                         div().debug_selector(|| "save-settings".into()).child(
                             Button::new("save-settings")
                                 .primary()
-                                .label("Save")
+                                .label(crate::i18n::t("Save"))
                                 .loading(self.settings_operation == Some(SettingsOperation::Save))
                                 .disabled(self.is_busy())
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1399,7 +1451,7 @@ impl Cockpit {
                         div()
                             .text_sm()
                             .text_color(rgb(MUTED))
-                            .child("Testing does not save your settings."),
+                            .child(crate::i18n::t("Testing does not save your settings.")),
                     ),
             );
         if !self.feedback.is_empty() {
@@ -1416,7 +1468,7 @@ impl Cockpit {
                     }))
                     .text_sm()
                     .text_color(rgb(if self.feedback_error { ERROR } else { SUCCESS }))
-                    .child(self.feedback.clone()),
+                    .child(text(&self.feedback)),
             );
         }
         div()
@@ -1523,9 +1575,9 @@ impl Cockpit {
             let age = if age < 1 {
                 "<1h ago".into()
             } else if age < 24 {
-                format!("{age}h ago")
+                crate::tr!("{age}h ago", age = age)
             } else {
-                format!("{}d ago", age / 24)
+                crate::tr!("{value0}d ago", value0 = age / 24)
             };
             list =
                 list.child(
@@ -1610,12 +1662,16 @@ impl Cockpit {
                                         .gap_2()
                                         .when(mr.draft, |row| {
                                             row.child(
-                                                widgets::badge("Draft", MUTED).debug_selector({
-                                                    let id = id.clone();
-                                                    move || {
-                                                        format!("draft-{}-{}", id.project, id.iid)
-                                                    }
-                                                }),
+                                                widgets::badge(crate::i18n::t("Draft"), MUTED)
+                                                    .debug_selector({
+                                                        let id = id.clone();
+                                                        move || {
+                                                            format!(
+                                                                "draft-{}-{}",
+                                                                id.project, id.iid
+                                                            )
+                                                        }
+                                                    }),
                                             )
                                         })
                                         .child(
@@ -1700,7 +1756,7 @@ impl Cockpit {
                     )),
             );
         if detail.issues.is_empty() {
-            panel = panel.child("No related GitLab issues found.");
+            panel = panel.child(crate::i18n::t("No related GitLab issues found."));
         }
         for (index, issue) in detail.issues.iter().enumerate() {
             let url = issue.web_url.clone();
@@ -1727,7 +1783,9 @@ impl Cockpit {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(cache) = self.disktree_cached(detail, window, cx) else {
-            return div().child("Preparing file statistics…").into_any_element();
+            return div()
+                .child(crate::i18n::t("Preparing file statistics…"))
+                .into_any_element();
         };
         let count = detail.files.len();
         div()
@@ -1829,7 +1887,7 @@ impl Cockpit {
                         .flex_shrink_0()
                         .text_size(px(11.))
                         .text_color(rgb(WARNING))
-                        .child("renamed"),
+                        .child(crate::i18n::t("renamed")),
                 )
             })
             .when(file.too_large || file.collapsed, |row| {
@@ -1838,7 +1896,7 @@ impl Cockpit {
                         .flex_shrink_0()
                         .text_size(px(11.))
                         .text_color(rgb(WARNING))
-                        .child("truncated by GitLab"),
+                        .child(crate::i18n::t("truncated by GitLab")),
                 )
             })
             .when_some(stat, |row, stat| {
@@ -1893,7 +1951,7 @@ impl Cockpit {
                         .text_color(rgb(CLAUDE)),
                 )
                 .child(match self.review_level {
-                    Some(level) => format!("Pre-review · {}", level.label()),
+                    Some(level) => crate::tr!("Pre-review · {value0}", value0 = level.label()),
                     None => "Pre-review".into(),
                 }),
         );
@@ -1927,7 +1985,10 @@ impl Cockpit {
                     div()
                         .text_size(px(12.))
                         .text_color(rgb(MUTED))
-                        .child(format!("Confidence  {:.0}%", review.confidence * 100.)),
+                        .child(crate::tr!(
+                            "Confidence  {value0}%",
+                            value0 = format!("{:.0}", review.confidence * 100.)
+                        )),
                 )
                 .child(section_label("Risks"));
             if review.risks.is_empty() {
@@ -1942,7 +2003,7 @@ impl Cockpit {
                                 .size(px(14.))
                                 .text_color(rgb(SUCCESS)),
                         )
-                        .child("No risks reported"),
+                        .child(crate::i18n::t("No risks reported")),
                 );
             }
             for (index, risk) in review.risks.iter().enumerate() {
@@ -2024,12 +2085,9 @@ impl Cockpit {
                 );
             }
         } else {
-            panel = panel.child(
-                div()
-                    .text_color(rgb(MUTED))
-                    .line_height(px(21.))
-                    .child("Choose a review level, then click Run review to start Claude."),
-            );
+            panel = panel.child(div().text_color(rgb(MUTED)).line_height(px(21.)).child(
+                crate::i18n::t("Choose a review level, then click Run review to start Claude."),
+            ));
         }
         panel.into_any_element()
     }
@@ -2081,7 +2139,7 @@ fn section_label(text: &'static str) -> Div {
         .mt_4()
         .text_size(px(13.))
         .text_color(rgb(MUTED))
-        .child(text)
+        .child(t(text))
 }
 
 impl Drop for Cockpit {
@@ -2094,6 +2152,22 @@ impl Drop for Cockpit {
 }
 impl Render for Cockpit {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::i18n::set(self.config.languages.interface);
+        if self.rendered_language != Some(self.config.languages.interface) {
+            self.rendered_language = Some(self.config.languages.interface);
+            for (input, placeholder) in [
+                (&self.search, "Search merge requests, authors, labels"),
+                (&self.project_name, "Project name"),
+                (&self.project_group, "All groups"),
+                (&self.token, "Personal access token"),
+                (&self.cf_id, "CF-Access-Client-Id (optional)"),
+                (&self.cf_secret, "CF-Access-Client-Secret (optional)"),
+            ] {
+                input.update(cx, |input, cx| {
+                    input.set_placeholder(t(placeholder), window, cx)
+                });
+            }
+        }
         if let Some(config) = self.saved_project.take() {
             let views = (self.settings, self.worktrees_view, self.threads_view);
             let secrets = [
@@ -2235,7 +2309,7 @@ impl Render for Cockpit {
                     .min_w_0()
                     .text_xs()
                     .text_color(rgb(MUTED))
-                    .child(self.status.clone()),
+                    .child(text(&self.status)),
             )
             .child(
                 div().debug_selector(|| "toggle-debug".into()).child(
@@ -2243,9 +2317,9 @@ impl Render for Cockpit {
                         .ghost()
                         .small()
                         .label(if self.logs_open {
-                            "Hide debug logs"
+                            crate::i18n::t("Hide debug logs")
                         } else {
-                            "Debug logs"
+                            crate::i18n::t("Debug logs")
                         })
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.logs_open = !this.logs_open;
@@ -2257,7 +2331,7 @@ impl Render for Cockpit {
             footer = footer.child(
                 Button::new("cancel-operation")
                     .small()
-                    .label("Cancel")
+                    .label(crate::i18n::t("Cancel"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(job) = this.job.take() {
                             job.abort();
@@ -2320,3 +2394,5 @@ mod tests;
 
 mod changes;
 mod radar;
+
+mod languages;

@@ -46,7 +46,7 @@ impl DetailTab {
         }
     }
     fn label(self) -> &'static str {
-        match self {
+        crate::i18n::t(match self {
             Self::Changes => "Changes",
             Self::Description => "Description",
             Self::Structure => "Structure",
@@ -57,15 +57,15 @@ impl DetailTab {
             Self::Risks => "Risks",
             Self::Checks => "Checks",
             Self::Visual => "Visual",
-        }
+        })
     }
 }
 /// "1,730 lines · 1 approval"; unknown values stay "?" rather than zero.
 pub(super) fn mr_metrics(lines: Option<u64>, approvals: Option<u64>) -> String {
     let count = |value: Option<u64>, one: &str, many: &str| match value {
-        Some(1) => format!("1 {one}"),
-        Some(n) => format!("{} {many}", thousands(n)),
-        None => format!("? {many}"),
+        Some(1) => format!("1 {}", crate::i18n::text(one)),
+        Some(n) => format!("{} {}", thousands(n), crate::i18n::text(many)),
+        None => format!("? {}", crate::i18n::text(many)),
     };
     format!(
         "{}  ·  {}",
@@ -160,7 +160,7 @@ impl Cockpit {
                                 .small()
                                 .h(px(32.))
                                 .ghost()
-                                .label("Close")
+                                .label(crate::i18n::t("Close"))
                                 .disabled(locked)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.cancel_navigation();
@@ -181,7 +181,7 @@ impl Cockpit {
                                 .h(px(32.))
                                 .ghost()
                                 .icon(IconName::ChevronLeft)
-                                .tooltip("Previous merge request")
+                                .tooltip(crate::i18n::t("Previous merge request"))
                                 .disabled(locked || position.is_none_or(|i| i == 0))
                                 .on_click(cx.listener(|this, _, _, cx| this.move_mr(-1, cx))),
                         ),
@@ -193,7 +193,7 @@ impl Cockpit {
                                 .h(px(32.))
                                 .ghost()
                                 .icon(IconName::ChevronRight)
-                                .tooltip("Next merge request")
+                                .tooltip(crate::i18n::t("Next merge request"))
                                 .disabled(
                                     locked
                                         || position
@@ -209,9 +209,9 @@ impl Cockpit {
                                 .h(px(32.))
                                 .ghost()
                                 .label(if self.reader_focused {
-                                    "Show queue"
+                                    crate::i18n::t("Show queue")
                                 } else {
-                                    "Focus"
+                                    crate::i18n::t("Focus")
                                 })
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.reader_focused = !this.reader_focused;
@@ -239,9 +239,9 @@ impl Cockpit {
         let Some(detail) = &self.detail else {
             return pane
                 .child(if self.navigation_job.is_some() {
-                    "Loading merge request…"
+                    crate::i18n::t("Loading merge request…")
                 } else {
-                    "Could not load this merge request. Select it again to retry."
+                    crate::i18n::t("Could not load this merge request. Select it again to retry.")
                 })
                 .into_any_element();
         };

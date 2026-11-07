@@ -13,10 +13,10 @@ use mrde_core::{
 
 fn change_badge(change: SymbolChangeKind) -> Div {
     match change {
-        SymbolChangeKind::Added => badge("added", SUCCESS),
-        SymbolChangeKind::Removed => badge("removed", ERROR),
-        SymbolChangeKind::Modified => badge("modified", INFO),
-        SymbolChangeKind::SignatureChanged => badge("signature", WARNING),
+        SymbolChangeKind::Added => badge(crate::i18n::t("added"), SUCCESS),
+        SymbolChangeKind::Removed => badge(crate::i18n::t("removed"), ERROR),
+        SymbolChangeKind::Modified => badge(crate::i18n::t("modified"), INFO),
+        SymbolChangeKind::SignatureChanged => badge(crate::i18n::t("signature"), WARNING),
     }
 }
 
@@ -90,12 +90,12 @@ impl Cockpit {
         let stats = self.file_stats(detail, window, cx);
         let mut section = div().flex().flex_col().gap_3().child(
             heading(
-                "Guided tour",
+                crate::i18n::t("Guided tour"),
                 tour.map(|t| {
-                    format!(
-                        "{} · about {} min",
-                        count(t.steps.len(), "step", "steps"),
-                        t.minutes
+                    crate::tr!(
+                        "{value0} · about {value1} min",
+                        value0 = count(t.steps.len(), "step", "steps"),
+                        value1 = t.minutes
                     )
                 }),
             )
@@ -107,9 +107,9 @@ impl Cockpit {
                         Button::new("generate-tour")
                             .small()
                             .label(if tour.is_some() {
-                                "Regenerate"
+                                crate::i18n::t("Regenerate")
                             } else {
-                                "Generate tour"
+                                crate::i18n::t("Generate tour")
                             })
                             .disabled(locked)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -126,7 +126,7 @@ impl Cockpit {
         );
         let Some(tour) = tour else {
             return section.child(muted(
-                "Claude groups the change into reading steps, in order, and draws its main flow. It runs only when you click.",
+                crate::i18n::t("Claude groups the change into reading steps, in order, and draws its main flow. It runs only when you click."),
             ));
         };
         for (index, step) in tour.steps.iter().enumerate() {
@@ -182,7 +182,9 @@ impl Cockpit {
                                     .text_color(rgb(HEADING))
                                     .child(step.title.clone()),
                             )
-                            .when(step.core, |row| row.child(badge("core of the MR", WARNING)))
+                            .when(step.core, |row| {
+                                row.child(badge(crate::i18n::t("core of the MR"), WARNING))
+                            })
                             .child(
                                 div()
                                     .flex_shrink_0()
@@ -199,10 +201,11 @@ impl Cockpit {
             );
         }
         if !tour.outside.is_empty() {
-            section = section.child(muted(format!(
-                "Outside the tour ({}): {}",
-                tour.outside.len(),
-                tour.outside
+            section = section.child(muted(crate::tr!(
+                "Outside the tour ({value0}): {value1}",
+                value0 = tour.outside.len(),
+                value1 = tour
+                    .outside
                     .iter()
                     .map(|f| file_name(f))
                     .collect::<Vec<_>>()
@@ -212,7 +215,7 @@ impl Cockpit {
         if let Some(diagram) = &tour.diagram {
             section = section
                 .child(heading(
-                    "Main flow",
+                    crate::i18n::t("Main flow"),
                     Some("NEW marks new or changed steps".into()),
                 ))
                 .child(
@@ -239,9 +242,9 @@ impl Cockpit {
             .child(self.tour_section(detail, window, cx));
         let Some(insights) = self.current_insights() else {
             return view
-                .child(heading("Symbols, impact, and file graph", None))
+                .child(heading(crate::i18n::t("Symbols, impact, and file graph"), None))
                 .child(self.analyze_prompt(
-                    "Analyze the worktree to list changed definitions, the code calling them, and how the changed files depend on each other.",
+                    crate::i18n::t("Analyze the worktree to list changed definitions, the code calling them, and how the changed files depend on each other."),
                     cx,
                 ))
                 .into_any_element();
@@ -301,33 +304,37 @@ impl Cockpit {
                 );
             if symbol.change == SymbolChangeKind::SignatureChanged {
                 if let Some(before) = &symbol.before {
-                    row = row.child(code(format!("before  {before}"), ERROR).pl(px(88.)));
+                    row = row.child(
+                        code(crate::tr!("before  {before}", before = before), ERROR).pl(px(88.)),
+                    );
                 }
                 if let Some(after) = &symbol.after {
-                    row = row.child(code(format!("after   {after}"), SUCCESS).pl(px(88.)));
+                    row = row.child(
+                        code(crate::tr!("after   {after}", after = after), SUCCESS).pl(px(88.)),
+                    );
                 }
             }
             symbols = symbols.child(row);
         }
         view = view
             .child(heading(
-                "Changed symbols",
+                crate::i18n::t("Changed symbols"),
                 Some(count(insights.symbols.len(), "definition", "definitions")),
             ))
             .child(if insights.symbols.is_empty() {
-                muted("No function, type, or class definition changed in a supported language (Go, TypeScript/JavaScript, Rust, Python).").into_any_element()
+                muted(crate::i18n::t("No function, type, or class definition changed in a supported language (Go, TypeScript/JavaScript, Rust, Python).")).into_any_element()
             } else {
                 symbols.into_any_element()
             });
 
         view = view.child(heading(
-            "Impact",
+            crate::i18n::t("Impact"),
             Some("Textual callers at the MR commit; check the ones the MR did not modify".into()),
         ));
         if insights.impacts.is_empty() {
-            view = view.child(muted(
+            view = view.child(muted(crate::i18n::t(
                 "No caller found for the modified, removed, or re-signed definitions.",
-            ));
+            )));
         }
         for (index, impact) in insights.impacts.iter().enumerate() {
             let outside = impact.callers.iter().filter(|c| !c.in_mr).count();
@@ -346,13 +353,14 @@ impl Cockpit {
                                 .flex_shrink_0()
                                 .text_size(px(12.))
                                 .text_color(rgb(if outside > 0 { WARNING } else { SUBTLE }))
-                                .child(format!(
-                                    "{} · {outside} outside the MR",
-                                    count(
+                                .child(crate::tr!(
+                                    "{value0} · {outside} outside the MR",
+                                    value0 = count(
                                         impact.callers.len() + impact.more as usize,
                                         "caller",
                                         "callers"
-                                    )
+                                    ),
+                                    outside = outside
                                 )),
                         ),
                 );
@@ -369,28 +377,30 @@ impl Cockpit {
                                 .gap_3()
                                 .child(div().w(px(96.)).flex_shrink_0().flex().child(
                                     if caller.in_mr {
-                                        badge("in MR", SUCCESS)
+                                        badge(crate::i18n::t("in MR"), SUCCESS)
                                     } else {
-                                        badge("not modified", WARNING)
+                                        badge(crate::i18n::t("not modified"), WARNING)
                                     },
                                 ))
                                 .child(path_line(&caller.path, Some(caller.line)).flex_1())
-                                .when(caller.test, |row| row.child(badge("test", INFO))),
+                                .when(caller.test, |row| {
+                                    row.child(badge(crate::i18n::t("test"), INFO))
+                                }),
                         )
                         .child(code(caller.text.clone(), MUTED).pl(px(108.))),
                 );
             }
             if impact.more > 0 {
-                block = block.child(muted(format!(
-                    "{} not shown.",
-                    count(impact.more as usize, "more match", "more matches")
+                block = block.child(muted(crate::tr!(
+                    "{value0} not shown.",
+                    value0 = count(impact.more as usize, "more match", "more matches")
                 )));
             }
             view = view.child(block);
         }
 
         view = view.child(heading(
-            "File graph",
+            crate::i18n::t("File graph"),
             Some(format!(
                 "{} · {}",
                 count(insights.graph.nodes.len(), "linked file", "linked files"),
@@ -398,7 +408,10 @@ impl Cockpit {
             )),
         ));
         view = view.child(if insights.graph.edges.is_empty() {
-            muted("No import or HTTP link between the changed files.").into_any_element()
+            muted(crate::i18n::t(
+                "No import or HTTP link between the changed files.",
+            ))
+            .into_any_element()
         } else {
             div()
                 .debug_selector(|| "file-graph".into())

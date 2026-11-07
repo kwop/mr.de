@@ -64,6 +64,15 @@ To export a radar directly:
 mrde-radar --base origin/main --worktree --format svg > /tmp/mrde-radar.svg
 ```
 
+## Recorded example
+
+![Recorded Claude radar response](../../docs/images/claude-radar-session.svg)
+
+This is a rendered transcript of a real Claude Code response on a synthetic two-commit
+repository, not a screenshot of Claude's interactive terminal. The scan and the response
+are preserved without session metadata or private source. See the [reproduction guide](../../docs/examples/claude-radar.md)
+and [standalone radar export](../../docs/images/claude-radar.svg).
+
 ## Validate the plugin
 
 ```sh

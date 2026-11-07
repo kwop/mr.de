@@ -17,7 +17,7 @@ fn block(title: &'static str, hint: String, control: impl IntoElement) -> Div {
             div()
                 .text_size(px(13.))
                 .text_color(rgb(HEADING))
-                .child(title),
+                .child(crate::i18n::t(title)),
         )
         // A flex row keeps buttons at their natural width instead of stretching.
         .child(div().flex().child(control))
@@ -26,7 +26,7 @@ fn block(title: &'static str, hint: String, control: impl IntoElement) -> Div {
                 .text_size(px(11.))
                 .line_height(px(16.))
                 .text_color(rgb(SUBTLE))
-                .child(hint),
+                .child(crate::i18n::text(&hint)),
         )
 }
 
@@ -45,7 +45,7 @@ impl Cockpit {
                         .h(px(32.))
                         .primary()
                         .icon(gpui_component::IconName::Bot)
-                        .label(format!("Run {} review", self.level.label().to_lowercase()))
+                        .label(crate::tr!("Run {value0} review", value0 = crate::i18n::t(self.level.label()).to_lowercase()))
                         .disabled(locked)
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(detail) = this.detail.clone() {
@@ -65,8 +65,8 @@ impl Cockpit {
                         .small()
                         .h(px(32.))
                         .icon(gpui_component::IconName::ChartPie)
-                        .label("Analyze")
-                        .tooltip("Symbols, impact, history, contracts, and risky patterns from the worktree")
+                        .label(crate::i18n::t("Analyze"))
+                        .tooltip(crate::i18n::t("Symbols, impact, history, contracts, and risky patterns from the worktree"))
                         .disabled(locked)
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(detail) = this.detail.clone() {
@@ -86,8 +86,8 @@ impl Cockpit {
                         .h(px(32.))
                         .ghost()
                         .icon(gpui_component::IconName::SquareTerminal)
-                        .label("Ask Claude")
-                        .tooltip("Ask Claude Code about this merge request in Threads. Read-only: plan mode, nothing is edited or pushed.")
+                        .label(crate::i18n::t("Ask Claude"))
+                        .tooltip(crate::i18n::t("Ask Claude Code about this merge request in Threads. Read-only: plan mode, nothing is edited or pushed."))
                         .disabled(locked)
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(detail) = this.detail.clone() {
@@ -101,8 +101,8 @@ impl Cockpit {
                 ),
             )
             .child(div().debug_selector(|| "super-resolver".into()).child(
-                Button::new("super-resolver").small().h(px(32.)).label("Super Resolver")
-                    .tooltip("Rebase, resolve conflicts, and push pipeline fixes to the source branch. Up to three repair attempts.")
+                Button::new("super-resolver").small().h(px(32.)).label(crate::i18n::t("Super Resolver"))
+                    .tooltip(crate::i18n::t("Rebase, resolve conflicts, and push pipeline fixes to the source branch. Up to three repair attempts."))
                     .disabled(self.initializing || self.confirm)
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(detail) = &this.detail {
@@ -119,7 +119,7 @@ impl Cockpit {
                         .small()
                         .h(px(32.))
                         .icon(gpui_component::IconName::Check)
-                        .label("Approve")
+                        .label(crate::i18n::t("Approve"))
                         .disabled(locked)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.interrupt_refresh();
@@ -134,7 +134,7 @@ impl Cockpit {
                     .h(px(32.))
                     .ghost()
                     .icon(gpui_component::IconName::ExternalLink)
-                    .tooltip(format!("Open in {}", self.config.provider.label()))
+                    .tooltip(crate::tr!("Open in {value0}", value0 = self.config.provider.label()))
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(detail) = &this.detail {
                             cx.open_url(&detail.mr.web_url);
@@ -157,11 +157,11 @@ impl Cockpit {
             .flex_col()
             .gap_2()
             .text_size(px(12.))
-            .child(format!(
-                "Approve {} !{} at commit {}?",
-                detail.mr.project,
-                detail.mr.id.iid,
-                detail.mr.sha.chars().take(12).collect::<String>()
+            .child(crate::tr!(
+                "Approve {value0} !{value1} at commit {value2}?",
+                value0 = detail.mr.project,
+                value1 = detail.mr.id.iid,
+                value2 = detail.mr.sha.chars().take(12).collect::<String>()
             ))
             .child(
                 div()
@@ -172,13 +172,13 @@ impl Cockpit {
                             Button::new("confirm")
                                 .small()
                                 .success()
-                                .label("Confirm approval")
+                                .label(crate::i18n::t("Confirm approval"))
                                 .disabled(busy)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(detail) = this.detail.clone() {
-                                        let message = format!(
-                                            "Approving on {}…",
-                                            this.config.provider.label()
+                                        let message = crate::tr!(
+                                            "Approving on {value0}…",
+                                            value0 = this.config.provider.label()
                                         );
                                         this.start(Action::Approve(detail), &message, cx);
                                     }
@@ -190,7 +190,7 @@ impl Cockpit {
                             Button::new("cancel-approval")
                                 .small()
                                 .ghost()
-                                .label("Cancel")
+                                .label(crate::i18n::t("Cancel"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.confirm = false;
                                     cx.notify();
@@ -221,7 +221,7 @@ impl Cockpit {
                             .small()
                             .ghost()
                             .w(px(96.))
-                            .label(level.label())
+                            .label(crate::i18n::t(level.label()))
                             .when(selected, |b| b.bg(rgb(SELECTED)).text_color(rgb(HEADING)))
                             .disabled(locked)
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -233,9 +233,9 @@ impl Cockpit {
         }
         let panel = div().child(block(
             "Review depth",
-            format!(
-                "{} Start Claude with the Run review button above.",
-                self.level.description()
+            crate::tr!(
+                "{value0} Start Claude with the Run review button above.",
+                value0 = crate::i18n::t(self.level.description())
             ),
             levels,
         ));
@@ -249,7 +249,7 @@ impl Cockpit {
             div().debug_selector(|| "statistics".into()).child(
                 Button::new("statistics")
                     .small()
-                    .label("Compute statistics")
+                    .label(crate::i18n::t("Compute statistics"))
                     .disabled(locked)
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(detail) = this.detail.clone() {
@@ -268,16 +268,16 @@ impl Cockpit {
             "Compliance check",
             // The folder as configured (`~/…`), not expanded to the home directory.
             match &spec {
-                Some(_) => format!(
-                    "Checks the ticket and the change against the specification in {}.",
-                    self.config.spec_path.trim()
+                Some(_) => crate::tr!(
+                    "Checks the ticket and the change against the specification in {value0}.",
+                    value0 = self.config.spec_path.trim()
                 ),
                 None => "Set the specification folder in GitLab settings first.".into(),
             },
             div().debug_selector(|| "compliance-check".into()).child(
                 Button::new("compliance-check")
                     .small()
-                    .label("Check compliance")
+                    .label(crate::i18n::t("Check compliance"))
                     .disabled(locked || spec.is_none())
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(detail) = this.detail.clone() {
@@ -330,7 +330,7 @@ impl Cockpit {
                     .gap_2()
                     .text_color(rgb(HEADING))
                     .child(status_dot(color, false))
-                    .child(format!("Compliance · {verdict}")),
+                    .child(crate::tr!("Compliance · {verdict}", verdict = verdict)),
             )
             .child(crate::markdown::view(
                 SharedString::from(format!(
@@ -346,7 +346,10 @@ impl Cockpit {
                 div()
                     .text_size(px(12.))
                     .text_color(rgb(MUTED))
-                    .child(format!("Confidence  {:.0}%", result.confidence * 100.)),
+                    .child(crate::tr!(
+                        "Confidence  {value0}%",
+                        value0 = format!("{:.0}", result.confidence * 100.)
+                    )),
             );
         if !result.spec_files.is_empty() {
             panel = panel.child(section_label("Specification"));
@@ -375,13 +378,7 @@ impl Cockpit {
                 .count();
             panel = panel
                 .child(section_label("Traceability"))
-                .child(muted(format!(
-                    "{} met · {} partial · {} missing · {} unclear · {untested} met without a test",
-                    count(RequirementStatus::Met),
-                    count(RequirementStatus::Partial),
-                    count(RequirementStatus::Missing),
-                    count(RequirementStatus::Unclear),
-                )));
+                .child(muted(crate::tr!("{value0} met · {value1} partial · {value2} missing · {value3} unclear · {untested} met without a test", value0 = count(RequirementStatus::Met), value1 = count(RequirementStatus::Partial), value2 = count(RequirementStatus::Missing), value3 = count(RequirementStatus::Unclear), untested = untested)));
             // One block per requirement with labeled Spec/Code/Tests lines: fixed table
             // columns left file names unreadable in a ~760 pt reading column.
             let labeled = |label: &'static str, lines: Vec<AnyElement>| {
@@ -437,10 +434,10 @@ impl Cockpit {
                     vec![if finding.status == RequirementStatus::Met {
                         div()
                             .flex()
-                            .child(badge("no test", WARNING))
+                            .child(badge(crate::i18n::t("no test"), WARNING))
                             .into_any_element()
                     } else {
-                        muted("—").into_any_element()
+                        muted(crate::i18n::t("—")).into_any_element()
                     }]
                 } else {
                     finding
@@ -480,7 +477,7 @@ impl Cockpit {
                         .child(labeled(
                             "Code",
                             if code.is_empty() {
-                                vec![muted("—").into_any_element()]
+                                vec![muted(crate::i18n::t("—")).into_any_element()]
                             } else {
                                 code
                             },

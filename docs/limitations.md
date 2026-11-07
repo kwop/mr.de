@@ -90,3 +90,17 @@ mr.de is experimental. These limits are known; others certainly exist.
 - Resolver worktrees are retained and not yet included in the Worktrees cleanup UI.
 - Terminal embedding is verified with a native macOS PTY and synthetic input. Actual Claude
   login, interactive permission prompts, and live GitLab repairs depend on the user's setup.
+
+## Terminal frontend and localization
+
+The first Ratatui frontend supports project selection, queue/search, descriptions, files,
+radar/median, reviews, history, Claude handoff and confirmed approval through shared services.
+It does not yet include connection editing, image zoom, embedded Threads or Super Resolver.
+It is validated on macOS; the shared Keychain adapter still needs Linux support. Protected
+Touch ID credentials require the signed TUI companion in the provisioned application bundle.
+Live Keychain access and interactive Claude handoff remain manual verification points.
+
+Interface and Claude response languages support English and French independently. Source
+content and raw tool diagnostics are preserved. Existing conversations are not translated;
+new AI results use language-specific cache entries. Screenshots demonstrate selected states,
+not complete accessibility or pixel-regression coverage.

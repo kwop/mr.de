@@ -7,7 +7,9 @@ to a test or Cucumber binding.
 
 | Contract area | Existing test entry points |
 | --- | --- |
-| Projects | [Project UI interactions](../crates/mrde-app/src/ui/tests/projects.rs), [project persistence](../crates/mrde-app/src/settings/projects_tests.rs) |
+| Languages | [Native controls](../crates/mrde-app/src/ui/tests/languages.rs), [persistence](../crates/mrde-service/src/settings.rs), [catalog/placeholders](../crates/mrde-core/src/language.rs), [Claude cache keys](../crates/mrde-claude/src/lib.rs) |
+| Terminal | [Interactions, worker responsiveness and rendering](../crates/mrde-tui/tests/interactions.rs); live terminal and Claude handoff also need manual verification |
+| Projects | [Project UI interactions](../crates/mrde-app/src/ui/tests/projects.rs), [project persistence](../crates/mrde-service/src/settings/projects_tests.rs) |
 | Connection settings | [UI tests](../crates/mrde-app/src/ui/tests.rs): `click_test_shows_busy_retains_token_and_never_saves`, `failed_save_keeps_form_and_displays_keychain_error`; [credential tests](../crates/mrde-store/src/secrets/tests.rs) |
 | Inbox | [Core scoring](../crates/mrde-core/src/scoring.rs), [inbox filters](../crates/mrde-core/src/inbox.rs), [search/context UI](../crates/mrde-app/src/ui/tests/chrome.rs), [GitLab mocks](../crates/mrde-forge/src/gitlab.rs), [GitHub mocks](../crates/mrde-forge/src/github/tests.rs) |
 | Reader and images | [Scrolling regressions](../crates/mrde-app/src/ui/tests/scrolling.rs), [Markdown layouts](../crates/mrde-app/src/markdown_layout_tests.rs), [UI tests](../crates/mrde-app/src/ui/tests.rs) |

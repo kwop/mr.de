@@ -17,6 +17,7 @@ tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 mrde-core.workspace = true
+mrde-service.workspace = true
 mrde-risk.workspace = true
 mrde-forge.workspace = true
 mrde-git.workspace = true

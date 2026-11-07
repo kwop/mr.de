@@ -174,3 +174,31 @@ python3 scripts/ui_catalog.py capture reader.history-bottom image.zoom risk.part
 Captures go to a fresh temporary directory and are candidates for review, never silently
 updated golden images. Keep new stories linked to relevant Gherkin IDs; validate behavior
 with the GPUI test platform in addition to inspecting native captures.
+
+
+## Keep product contracts and screen references current
+
+Every user-facing change must update the affected `specs/features/*.feature` contracts and
+relevant screen references in the same batch. Add a scenario before introducing a new UI
+state. Capture synthetic data, inspect the result, and record the command, language, size,
+source revision and known limitations in `docs/images/README.md`. Never publish private MR
+content or credential-bearing captures. A successful build is not a visual verification.
+
+The native catalog includes `languages.french` and `risk.french`. `MRDE_LANGUAGE=en|fr`
+selects a preview language. Terminal references use the actual Ratatui buffer:
+
+```sh
+cargo run --locked -p mrde-tui -- --demo --screen radar --snapshot /tmp/tui-radar.svg
+cargo run --locked -p mrde-tui -- --demo --screen settings --language fr --snapshot /tmp/tui-settings-fr.svg
+```
+
+`mrde-core/locales/fr.json` is shared by both interfaces. Application copy uses translation
+keys and named placeholders. Preserve source titles, labels, descriptions, code and tool
+output. New keys need French translations; the catalog test checks placeholder parity.
+Test both languages and narrow layouts. Information language applies to new Claude
+requests; it does not translate an existing conversation or an external tool's output.
+
+`mrde-service` owns connection settings, project catalogs and the injected `Executor`.
+Keep GPUI and Ratatui dependencies in their respective frontend crates. Terminal state
+produces effects; its runtime executes them off the input thread. Never add Git, HTTP,
+Keychain or process waits to a renderer.

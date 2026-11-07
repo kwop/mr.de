@@ -168,8 +168,9 @@ impl Threads {
         let sender = self.sender.clone();
         self.runtime.spawn(async move {
             if let Err(error) = executor.save_thread(thread).await {
-                let _ = sender.send(Message::StorageError(format!(
-                    "Cannot save thread: {error:#}"
+                let _ = sender.send(Message::StorageError(crate::tr!(
+                    "Cannot save thread: {error}",
+                    error = format!("{error:#}")
                 )));
             }
         });
@@ -438,7 +439,12 @@ impl Threads {
                                 self.records.push(thread);
                             }
                         }
-                        Err(error) => self.status = format!("Cannot load Threads: {error:#}"),
+                        Err(error) => {
+                            self.status = crate::tr!(
+                                "Cannot load Threads: {error}",
+                                error = format!("{error:#}")
+                            )
+                        }
                     }
                 }
                 Message::Loaded(..) => {}
@@ -630,7 +636,7 @@ impl Threads {
                 if let Some(first) = first {
                     self.first_launch.insert(session, first);
                 }
-                self.status = format!("Cannot open the terminal: {error}");
+                self.status = crate::tr!("Cannot open the terminal: {error}", error = error);
             }
         }
     }
@@ -645,6 +651,7 @@ impl Drop for Threads {
 
 impl Render for Threads {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::i18n::set(self.config.languages.interface);
         #[cfg(target_os = "macos")]
         if let Some((id, session)) = self.pending_terminal.take() {
             self.open_terminal(id, session, window, cx);
@@ -669,7 +676,7 @@ impl Render for Threads {
                     .text_size(px(16.))
                     .text_color(rgb(HEADING))
                     .mb_3()
-                    .child("Threads"),
+                    .child(crate::i18n::t("Threads")),
             );
         let closed_count = self
             .records
@@ -686,7 +693,10 @@ impl Render for Threads {
                         .label(if self.show_closed {
                             "Open threads".to_string()
                         } else {
-                            format!("Closed threads ({closed_count})")
+                            crate::tr!(
+                                "Closed threads ({closed_count})",
+                                closed_count = closed_count
+                            )
                         })
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.show_closed = !this.show_closed;
@@ -738,7 +748,11 @@ impl Render for Threads {
                                 thread.attempts
                             )
                         } else {
-                            format!("!{} · {} · read-only", thread.mr.iid, thread.label())
+                            crate::tr!(
+                                "!{value0} · {value1} · read-only",
+                                value0 = thread.mr.iid,
+                                value1 = thread.label()
+                            )
                         },
                     ))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -762,7 +776,7 @@ impl Render for Threads {
                         } else {
                             MUTED
                         }))
-                        .child(format!("Claude · session {}", index + 1))
+                        .child(crate::tr!("Claude · session {value0}", value0 = index + 1))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.selected = Some(id.clone());
                             this.session = Some(session_id.clone());
@@ -798,14 +812,14 @@ impl Render for Threads {
                 .gap_2()
                 .border_b_1()
                 .border_color(rgb(PANEL_LINE))
-                .child(div().flex_1().child(thread.label()));
+                .child(div().flex_1().child(crate::i18n::t(thread.label())));
             if thread.closed_at.is_some() {
                 let id = id.clone();
                 toolbar = toolbar.child(
                     div().debug_selector(|| "reopen-thread".into()).child(
                         Button::new("reopen-thread")
                             .small()
-                            .label("Reopen thread")
+                            .label(crate::i18n::t("Reopen thread"))
                             .disabled(self.stopping.contains(&id))
                             .on_click(
                                 cx.listener(move |this, _, _, cx| this.reopen_thread(&id, cx)),
@@ -818,7 +832,7 @@ impl Render for Threads {
                     div().debug_selector(|| "stop-resolver".into()).child(
                         Button::new("stop-resolver")
                             .small()
-                            .label("Stop")
+                            .label(crate::i18n::t("Stop"))
                             .on_click(cx.listener(move |this, _, _, cx| this.stop(&id, None, cx))),
                     ),
                 );
@@ -828,7 +842,7 @@ impl Render for Threads {
                     div().debug_selector(|| "resume-resolver".into()).child(
                         Button::new("resume-resolver")
                             .small()
-                            .label("Resume · 3 attempts")
+                            .label(crate::i18n::t("Resume · 3 attempts"))
                             .disabled(self.terminal_alive(&id, cx) || self.stopping.contains(&id))
                             .on_click(cx.listener(move |this, _, _, cx| this.resume(&id, cx))),
                     ),
@@ -840,7 +854,11 @@ impl Render for Threads {
                 toolbar = toolbar.child(
                     Button::new("thread-terminal")
                         .small()
-                        .label(if active { "Take over" } else { "Open terminal" })
+                        .label(if active {
+                            crate::i18n::t("Take over")
+                        } else {
+                            crate::i18n::t("Open terminal")
+                        })
                         .disabled(self.stopping.contains(&id))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if active {
@@ -862,7 +880,7 @@ impl Render for Threads {
                 toolbar = toolbar.child(
                     Button::new("close-terminal")
                         .small()
-                        .label("Close terminal")
+                        .label(crate::i18n::t("Close terminal"))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(terminal) = this.terminals.remove(&key) {
                                 terminal.update(cx, |terminal, _| terminal.set_visible(false));
@@ -876,8 +894,8 @@ impl Render for Threads {
             if thread.closed_at.is_none() {
                 let id = id.clone();
                 toolbar = toolbar.child(div().debug_selector(|| "close-thread".into()).child(
-                    Button::new("close-thread").small().label("Close thread")
-                        .tooltip("Stop activity and move this thread to Closed threads; preserve its worktree and history.")
+                    Button::new("close-thread").small().label(crate::i18n::t("Close thread"))
+                        .tooltip(crate::i18n::t("Stop activity and move this thread to Closed threads; preserve its worktree and history."))
                         .on_click(cx.listener(move |this, _, _, cx| this.close_thread(&id, cx)))));
             }
             reader = reader.child(toolbar.flex_wrap());
@@ -928,12 +946,9 @@ impl Render for Threads {
                 );
             }
         } else {
-            reader = reader.child(
-                div()
-                    .p_5()
-                    .text_color(rgb(MUTED))
-                    .child("Select a thread to inspect its sessions and pipeline history."),
-            );
+            reader = reader.child(div().p_5().text_color(rgb(MUTED)).child(crate::i18n::t(
+                "Select a thread to inspect its sessions and pipeline history.",
+            )));
         }
         div()
             .debug_selector(|| "threads-view".into())

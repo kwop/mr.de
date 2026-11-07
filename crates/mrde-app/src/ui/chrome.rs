@@ -100,7 +100,13 @@ fn nav_item(
         })
         .when(!selected, |d| d.hover(|style| style.bg(rgb(HOVER))))
         .child(Icon::new(icon).size_4())
-        .child(div().flex_1().min_w_0().one_line().child(ellipsis(label)))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .one_line()
+                .child(ellipsis(crate::i18n::t(label))),
+        )
         .children(count.map(|count| {
             div()
                 .flex_shrink_0()
@@ -121,7 +127,7 @@ fn section(title: &'static str) -> Div {
         .justify_between()
         .text_size(px(12.))
         .text_color(rgb(MUTED))
-        .child(title)
+        .child(crate::i18n::t(title))
 }
 
 impl Cockpit {
@@ -197,7 +203,11 @@ impl Cockpit {
                 self.show_detail_tab(DetailTab::Description);
                 self.start(
                     Action::Open(text),
-                    &format!("Opening {}!{}…", reference.project, reference.iid),
+                    &crate::tr!(
+                        "Opening {value0}!{value1}…",
+                        value0 = reference.project,
+                        value1 = reference.iid
+                    ),
                     cx,
                 );
                 self.opening = self.navigation_job.is_some();
@@ -243,14 +253,21 @@ impl Cockpit {
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(initials(&user))
                 .tooltip(move |window, cx| {
-                    Tooltip::new(format!("Signed in to {provider} as {user}")).build(window, cx)
+                    Tooltip::new(crate::tr!(
+                        "Signed in to {provider} as {user}",
+                        provider = provider,
+                        user = user
+                    ))
+                    .build(window, cx)
                 }),
             None => avatar
                 .text_color(rgb(SUBTLE))
                 .child(Icon::new(IconName::CircleUser).size(px(22.)))
                 .tooltip(|window, cx| {
-                    Tooltip::new("GitLab identity appears after the first refresh")
-                        .build(window, cx)
+                    Tooltip::new(crate::i18n::t(
+                        "GitLab identity appears after the first refresh",
+                    ))
+                    .build(window, cx)
                 }),
         };
         div()
@@ -271,7 +288,7 @@ impl Cockpit {
                     .items_center()
                     .text_size(px(13.))
                     .text_color(rgb(SUBTLE))
-                    .child("mr.de"),
+                    .child(crate::i18n::t("mr.de")),
             )
             .child(
                 div()
@@ -287,7 +304,7 @@ impl Cockpit {
                     Button::new("titlebar-settings")
                         .ghost()
                         .icon(IconName::Settings)
-                        .tooltip("Project settings")
+                        .tooltip(crate::i18n::t("Project settings"))
                         .when(self.settings, |b| b.bg(rgb(SELECTED)))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.confirm = false;
@@ -413,7 +430,7 @@ impl Cockpit {
                     .child(if self.labels_expanded {
                         "Fewer labels".to_string()
                     } else {
-                        format!("{} more", facets.len() - SIDEBAR_LABELS)
+                        crate::tr!("{value0} more", value0 = facets.len() - SIDEBAR_LABELS)
                     })
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.labels_expanded = !this.labels_expanded;
@@ -455,9 +472,9 @@ impl Cockpit {
                         .text_color(rgb(HEADING))
                         .font_weight(FontWeight::MEDIUM)
                         .child(Icon::new(IconName::Plus).size_4())
-                        .child("Open MR…")
+                        .child(crate::i18n::t("Open MR…"))
                         .tooltip(|window, cx| {
-                            Tooltip::new("Open a merge request from its link (⌘O)")
+                            Tooltip::new(crate::i18n::t("Open a merge request from its link (⌘O)"))
                                 .build(window, cx)
                         })
                         .on_click(
@@ -522,7 +539,7 @@ impl Cockpit {
                                 .cursor_pointer()
                                 .text_color(rgb(INFO))
                                 .hover(|style| style.text_color(rgb(HEADING)))
-                                .child("Clear")
+                                .child(crate::i18n::t("Clear"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.filter.labels.clear();
                                     this.set_queue_page(0);
@@ -535,15 +552,33 @@ impl Cockpit {
             .child(section("Settings"))
             .child(
                 nav_item(
-                    "nav-settings",
+                    "nav-languages",
                     IconName::Settings,
-                    "Project settings",
+                    "Languages",
                     None,
-                    self.settings,
+                    self.settings && self.language_page,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.confirm = false;
                     this.settings = true;
+                    this.language_page = true;
+                    this.worktrees_view = false;
+                    this.threads_view = false;
+                    cx.notify();
+                })),
+            )
+            .child(
+                nav_item(
+                    "nav-settings",
+                    IconName::Settings,
+                    "Project settings",
+                    None,
+                    self.settings && !self.language_page,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.confirm = false;
+                    this.settings = true;
+                    this.language_page = false;
                     this.worktrees_view = false;
                     this.threads_view = false;
                     cx.notify();
@@ -602,7 +637,7 @@ impl Cockpit {
                             .text_size(px(16.))
                             .text_color(rgb(HEADING))
                             .font_weight(FontWeight::MEDIUM)
-                            .child("Open a merge request"),
+                            .child(crate::i18n::t("Open a merge request")),
                     )
                     .child(
                         div()
@@ -612,9 +647,7 @@ impl Cockpit {
                                 "Connect GitLab in Settings first, then paste a merge request link."
                                     .to_string()
                             } else {
-                                format!(
-                                    "Paste a link from {host}, or a reference such as group/project!123."
-                                )
+                                crate::tr!("Paste a link from {host}, or a reference such as group/project!123.", host = host)
                             }),
                     )
                     .child(
@@ -642,7 +675,7 @@ impl Cockpit {
                                 div().debug_selector(|| "open-mr-cancel".into()).child(
                                     Button::new("open-mr-cancel")
                                         .ghost()
-                                        .label("Cancel")
+                                        .label(crate::i18n::t("Cancel"))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.close_open_dialog(cx)
                                         })),
@@ -652,7 +685,7 @@ impl Cockpit {
                                 div().debug_selector(|| "open-mr-submit".into()).child(
                                     Button::new("open-mr-submit")
                                         .primary()
-                                        .label("Open")
+                                        .label(crate::i18n::t("Open"))
                                         .disabled(empty || self.initializing)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.submit_open(window, cx)

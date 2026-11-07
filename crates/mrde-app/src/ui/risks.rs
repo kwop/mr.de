@@ -9,9 +9,9 @@ use mrde_core::insights::{ContractCategory, ContractSeverity, DependencyChangeKi
 
 fn severity(severity: ContractSeverity) -> Div {
     match severity {
-        ContractSeverity::Breaking => badge("breaking", ERROR),
-        ContractSeverity::Review => badge("check", WARNING),
-        ContractSeverity::Info => badge("info", SUBTLE),
+        ContractSeverity::Breaking => badge(crate::i18n::t("breaking"), ERROR),
+        ContractSeverity::Review => badge(crate::i18n::t("check"), WARNING),
+        ContractSeverity::Info => badge(crate::i18n::t("info"), SUBTLE),
     }
 }
 
@@ -56,7 +56,7 @@ impl Cockpit {
     pub(super) fn risks_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(insights) = self.current_insights() else {
             return self.analyze_prompt(
-                "Analyze the worktree to detect contract changes (schema, endpoints, configuration, permissions), dependency upgrades, and risky patterns in added lines.",
+                crate::i18n::t("Analyze the worktree to detect contract changes (schema, endpoints, configuration, permissions), dependency upgrades, and risky patterns in added lines."),
                 cx,
             );
         };
@@ -82,11 +82,11 @@ impl Cockpit {
                     .flex_wrap()
                     .gap_2()
                     .child(badge(
-                        format!("{breaking} breaking"),
+                        crate::tr!("{breaking} breaking", breaking = breaking),
                         if breaking > 0 { ERROR } else { SUBTLE },
                     ))
                     .child(badge(
-                        format!("{review} to check"),
+                        crate::tr!("{review} to check", review = review),
                         if review > 0 { WARNING } else { SUBTLE },
                     ))
                     .child(badge(
@@ -111,13 +111,13 @@ impl Cockpit {
                     )),
             )
             .child(heading(
-                "Contracts",
+                crate::i18n::t("Contracts"),
                 Some("What other systems, deployments, or clients rely on".into()),
             ));
         if insights.contracts.is_empty() {
-            view = view.child(muted(
+            view = view.child(muted(crate::i18n::t(
                 "No schema, endpoint, configuration, or permission change detected.",
-            ));
+            )));
         }
         let categories = [
             ContractCategory::Database,
@@ -185,11 +185,11 @@ impl Cockpit {
         }
 
         view = view.child(heading(
-            "Dependencies",
+            crate::i18n::t("Dependencies"),
             Some("Direct dependencies from manifests".into()),
         ));
         if insights.dependencies.is_empty() && insights.lockfiles.is_empty() {
-            view = view.child(muted("No dependency change."));
+            view = view.child(muted(crate::i18n::t("No dependency change.")));
         }
         let mut manifests: Vec<&str> = insights
             .dependencies
@@ -209,10 +209,12 @@ impl Cockpit {
                 .enumerate()
             {
                 let kind = match dependency.kind {
-                    DependencyChangeKind::Added => badge("added", SUCCESS),
-                    DependencyChangeKind::Removed => badge("removed", ERROR),
-                    DependencyChangeKind::Upgraded => badge("upgraded", INFO),
-                    DependencyChangeKind::Downgraded => badge("downgraded", WARNING),
+                    DependencyChangeKind::Added => badge(crate::i18n::t("added"), SUCCESS),
+                    DependencyChangeKind::Removed => badge(crate::i18n::t("removed"), ERROR),
+                    DependencyChangeKind::Upgraded => badge(crate::i18n::t("upgraded"), INFO),
+                    DependencyChangeKind::Downgraded => {
+                        badge(crate::i18n::t("downgraded"), WARNING)
+                    }
                 };
                 let versions = match (&dependency.before, &dependency.after) {
                     (Some(before), Some(after)) => format!("{before} → {after}"),
@@ -228,8 +230,12 @@ impl Cockpit {
                             .gap_3()
                             .child(div().w(px(84.)).flex_shrink_0().flex().child(kind))
                             .child(code(dependency.name.clone(), HEADING).flex_1())
-                            .when(dependency.major, |r| r.child(badge("major", WARNING)))
-                            .when(dependency.dev, |r| r.child(badge("dev", SUBTLE)))
+                            .when(dependency.major, |r| {
+                                r.child(badge(crate::i18n::t("major"), WARNING))
+                            })
+                            .when(dependency.dev, |r| {
+                                r.child(badge(crate::i18n::t("dev"), SUBTLE))
+                            })
                             .child(code(versions, MUTED).flex_shrink_0().max_w(px(260.))),
                     ),
                 );
@@ -237,18 +243,22 @@ impl Cockpit {
             view = view.child(block);
         }
         for lockfile in &insights.lockfiles {
-            view = view.child(muted(format!(
-                "{}: {} resolved packages added, {} removed",
-                lockfile.path, lockfile.added, lockfile.removed
+            view = view.child(muted(crate::tr!(
+                "{value0}: {value1} resolved packages added, {value2} removed",
+                value0 = lockfile.path,
+                value1 = lockfile.added,
+                value2 = lockfile.removed
             )));
         }
 
         view = view.child(heading(
-            "Risky patterns",
+            crate::i18n::t("Risky patterns"),
             Some("Added lines only; tests excluded where noise is expected".into()),
         ));
         if insights.patterns.is_empty() {
-            view = view.child(muted("No risky pattern found in the added lines."));
+            view = view.child(muted(crate::i18n::t(
+                "No risky pattern found in the added lines.",
+            )));
         } else {
             let mut block = card().debug_selector(|| "patterns".into()).p_0().gap_0();
             for (index, pattern) in insights.patterns.iter().take(80).enumerate() {

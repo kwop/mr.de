@@ -210,3 +210,21 @@ title = "Closed thread history"
 scenario = "threads:closed"
 contracts = ["MRDE-RESOLVE-009"]
 inspect = ["Closed threads remain readable", "Reopen thread fits at minimum width", "No terminal starts automatically"]
+
+[[story]]
+id = "languages.french"
+title = "Independent French interface and English information"
+scenario = "settings:languages"
+contracts = ["MRDE-LANG-001", "MRDE-LANG-002"]
+inspect = ["Both independent language controls remain visible", "Save is separate from connection credentials", "Navigation and form captions are translated"]
+[story.env]
+MRDE_LANGUAGE = "fr"
+
+[[story]]
+id = "risk.french"
+title = "French radar with nine axes and a partial result"
+scenario = "focus:changes"
+contracts = ["MRDE-LANG-001", "MRDE-LANG-003", "MRDE-RISK-001"]
+inspect = ["Long French axis labels wrap without overlapping the chart", "Ticket age is visible", "Missing lint remains n/a; the median cache date is visible"]
+[story.env]
+MRDE_LANGUAGE = "fr"

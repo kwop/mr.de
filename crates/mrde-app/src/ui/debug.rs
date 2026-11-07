@@ -51,16 +51,21 @@ impl Cockpit {
                     .items_center()
                     .justify_between()
                     .flex_shrink_0()
-                    .child(div().text_xs().text_color(rgb(MUTED)).child("Debug logs"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(MUTED))
+                            .child(crate::i18n::t("Debug logs")),
+                    )
                     .child(
                         div().debug_selector(|| "copy-debug-logs".into()).child(
                             Button::new("copy-debug-logs")
                                 .ghost()
                                 .small()
                                 .label(if self.logs_copied {
-                                    "Copied"
+                                    crate::i18n::t("Copied")
                                 } else {
-                                    "Copy logs"
+                                    crate::i18n::t("Copy logs")
                                 })
                                 .icon(if self.logs_copied {
                                     IconName::Check

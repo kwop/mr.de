@@ -59,7 +59,7 @@ analysis.
 |---|---|---|
 | ![Structure tab](docs/images/structure.png) | ![Risks tab](docs/images/risks.png) | ![Traceability matrix](docs/images/traceability.png) |
 
-All screenshots use the built-in demo data (`--ui-preview`).
+All screenshots use synthetic data. See [capture provenance](docs/images/README.md).
 
 ## Requirements
 
@@ -129,6 +129,24 @@ See [the risk guide](docs/risk.md) for measurement limits, sample counts and cac
   summaries, resolver sessions, and bounded job traces from your instance. Credentials are
   never attached to Claude prompts or stored in this cache.
 
+## Terminal interface and languages
+
+A [Ratatui terminal frontend](docs/tui.md) now shares the desktop's application services:
+project switching, searchable queues, Markdown descriptions, files, risk radar, median
+cache, review, chat, history and confirmed approval.
+
+```sh
+cargo run --locked -p mrde-tui -- --demo
+cargo run --locked -p mrde-tui -- --demo --screen radar
+```
+
+![Terminal radar](docs/images/tui-radar.svg)
+
+Choose **Languages** in the sidebar for independent **interface** and **Claude response**
+languages (English/French). Preferences apply to all projects and both frontends; changing
+them never accesses credentials. Repository text and external diagnostics stay original.
+AI caches include the response language; numeric radar caches remain reusable.
+
 ## Standalone radar and Claude Code plugin
 
 Use the same risk engine from a terminal or a Claude Code session, without launching GPUI:
@@ -140,7 +158,9 @@ mrde-radar --base origin/main --worktree --json
 
 The CLI supports current files or two commits, text/JSON/SVG output, and explicit external
 checks. The [Claude plugin](plugins/mrde/README.md) adds `/mrde:radar` to the current session.
-See the [CLI guide](docs/radar-cli.md) for configuration, installation and limitations.
+See the [CLI guide](docs/radar-cli.md) for configuration, installation and limitations,
+and the [recorded Claude example](docs/examples/claude-radar.md) for real output and its
+reproducible two-commit fixture.
 
 ## Documentation
 
