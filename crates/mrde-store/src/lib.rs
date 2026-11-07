@@ -20,7 +20,9 @@ impl Store {
         if version < 2 {
             connection.execute_batch(include_str!("../migrations/002_threads.sql"))?;
         }
-        if version < 3 { connection.execute_batch(include_str!("../migrations/003_risk.sql"))?; }
+        if version < 3 {
+            connection.execute_batch(include_str!("../migrations/003_risk.sql"))?;
+        }
         Ok(Self { connection })
     }
     pub fn threads(
@@ -119,7 +121,7 @@ mod tests {
             .connection
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         // The new migration is repeatable and does not replace the existing caches.
         store
             .connection

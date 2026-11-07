@@ -40,6 +40,7 @@ fn risk_color(file: Option<&FileHistory>) -> u32 {
 }
 
 struct TileView {
+    path: Option<String>,
     left: f32,
     top: f32,
     width: f32,
@@ -103,6 +104,7 @@ fn build(stats: &DiffStats, history: Option<&[FileHistory]>) -> Option<Model> {
                 (None, _) => zone_color(tile.zone),
             };
             TileView {
+                path: tile.file.map(|i| stats.files[i].path.clone()),
                 left: (r.x / ASPECT) as f32,
                 top: r.y as f32,
                 width: (r.w / ASPECT) as f32,
@@ -367,6 +369,17 @@ impl Cockpit {
             canvas = canvas.child(
                 div()
                     .id(("disktree-tile", index))
+                    .when_some(
+                        tile.path
+                            .clone()
+                            .filter(|_| self.detail_tab == super::inbox::DetailTab::Changes),
+                        |tile, path| {
+                            tile.cursor_pointer()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.select_risk_file(path.clone(), cx)
+                                }))
+                        },
+                    )
                     .absolute()
                     .left(relative(tile.left))
                     .top(relative(tile.top))

@@ -223,6 +223,27 @@ impl RiskConfig {
         );
         self.verdict.validate()?;
         ensure!(
+            matches!(self.complexity.format.as_str(), "lizard"),
+            "Complexity format must be lizard"
+        );
+        for command in &self.lint {
+            ensure!(
+                matches!(
+                    command.format.as_str(),
+                    "json" | "eslint" | "clippy" | "regex"
+                ),
+                "Unsupported lint format"
+            );
+        }
+        let coverage = Path::new(&self.coverage_path);
+        ensure!(
+            !coverage.is_absolute()
+                && !coverage
+                    .components()
+                    .any(|p| matches!(p, std::path::Component::ParentDir)),
+            "coverage_path must stay inside the repository"
+        );
+        ensure!(
             self.normalization.len() == 8,
             "Define only the eight known normalization axes"
         );

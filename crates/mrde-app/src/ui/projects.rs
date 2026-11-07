@@ -148,6 +148,11 @@ impl Cockpit {
     ) {
         self.cancel_navigation();
         self.confirm = false;
+        self.risk = None;
+        self.risk_baseline = None;
+        self.risk_axis = None;
+        self.risk_file = None;
+        self.risk_selected_file = None;
         self.queue.clear();
         self.worktrees.clear();
         self.selected_mr = None;

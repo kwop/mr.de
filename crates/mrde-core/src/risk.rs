@@ -284,7 +284,12 @@ pub struct RiskSummary {
 }
 impl From<&RiskReport> for RiskSummary {
     fn from(report: &RiskReport) -> Self {
-        Self { scores: std::array::from_fn(|i| report.profile.axes[i].score), mean: report.profile.mean(), head_sha: report.profile.head_sha.clone(), computed_at: report.profile.computed_at }
+        Self {
+            scores: std::array::from_fn(|i| report.profile.axes[i].score),
+            mean: report.profile.mean(),
+            head_sha: report.profile.head_sha.clone(),
+            computed_at: report.profile.computed_at,
+        }
     }
 }
 

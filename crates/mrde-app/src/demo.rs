@@ -549,3 +549,96 @@ pub fn visual() -> anyhow::Result<mrde_core::insights::VisualReport> {
     draw(after.join("schedule-dialog.png"), true, true)?;
     mrde_insights::visual::compare(&before, &after, &diff)
 }
+
+/// Synthetic risk evidence; preview mode never invokes local analysis commands.
+pub fn risk(detail: &MrDetail) -> mrde_core::risk::RiskReport {
+    use mrde_core::risk::*;
+    let stats = stats(detail);
+    let scores = [
+        Some(5.2),
+        Some(4.2),
+        Some(7.),
+        Some(3.),
+        Some(8.6),
+        Some(4.5),
+        None,
+        Some(3.7),
+    ];
+    let axes = std::array::from_fn(|i| match scores[i] {
+        Some(score) => AxisScore {
+            axis: Axis::ALL[i],
+            score: Some(score),
+            unavailable: None,
+            raw: Some(RawMetric {
+                value: score * 5.,
+                unit: "demo units".into(),
+                method: "Synthetic preview measurement".into(),
+                estimated: i == 3 || i == 5,
+                evidence: stats
+                    .files
+                    .iter()
+                    .take(3)
+                    .map(|f| Evidence {
+                        path: f.path.clone(),
+                        line: Some(12),
+                        detail: "Synthetic finding in the changed code".into(),
+                        contribution: 1.,
+                    })
+                    .collect(),
+            }),
+        },
+        None => AxisScore::unavailable(Axis::ALL[i], "No lint commands configured"),
+    });
+    RiskReport {
+        profile: RiskProfile {
+            axes,
+            computed_at: chrono::Utc::now(),
+            head_sha: detail.mr.sha.clone(),
+            base_sha: detail.mr.base_sha.clone(),
+            config_key: "preview".into(),
+        },
+        verdict_thresholds: VerdictThresholds::default(),
+        stats,
+        pending_commands: vec![],
+    }
+}
+pub fn baseline() -> mrde_core::risk::Baseline {
+    mrde_core::risk::Baseline {
+        medians: [
+            Some(4.),
+            Some(3.),
+            Some(5.),
+            Some(4.),
+            Some(5.),
+            Some(3.),
+            Some(2.),
+            Some(2.),
+        ],
+        samples: [30, 30, 24, 30, 30, 30, 22, 30],
+        requested: 30,
+        merged_mrs: 30,
+        computed_at: chrono::Utc::now(),
+        warnings: vec![],
+    }
+}
+pub fn file_context(path: &str) -> mrde_core::risk::FileContext {
+    mrde_core::risk::FileContext {
+        path: path.into(),
+        authors: vec![("Alex R.".into(), 65.), ("Sam L.".into(), 35.)],
+        commits: vec![
+            mrde_core::risk::FileCommit {
+                sha: "a".repeat(40),
+                date: "2026-10-12".into(),
+                author: "Alex R.".into(),
+                subject: "Validate the scheduling boundary".into(),
+            },
+            mrde_core::risk::FileCommit {
+                sha: "b".repeat(40),
+                date: "2026-09-24".into(),
+                author: "Sam L.".into(),
+                subject: "Add scheduling tests".into(),
+            },
+        ],
+        warnings: vec![],
+    }
+}

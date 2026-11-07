@@ -180,6 +180,38 @@ impl Executor for FakeExecutor {
                     },
                 ))
             }
+            Action::Risk(detail) | Action::ApproveRiskCommand(detail, _) => {
+                actions.push("risk".into());
+                Ok(Outcome::Risk(
+                    detail.mr.id.clone(),
+                    Box::new(crate::demo::risk(&detail)),
+                ))
+            }
+            Action::RiskBaseline(detail) => {
+                actions.push("baseline".into());
+                Ok(Outcome::RiskBaseline(
+                    detail.mr.id.clone(),
+                    crate::demo::baseline(),
+                ))
+            }
+            Action::RiskFile(detail, path) => {
+                actions.push("risk-file".into());
+                Ok(Outcome::RiskFile(
+                    detail.mr.id.clone(),
+                    detail.mr.sha.clone(),
+                    crate::demo::file_context(&path),
+                ))
+            }
+            Action::AskRisk(detail, _, _) => {
+                actions.push("ask-risk".into());
+                let directory = std::env::temp_dir();
+                Ok(Outcome::Ask(Box::new(crate::backend::AskReady::new(
+                    &detail,
+                    directory.clone(),
+                    directory.clone(),
+                    &directory.join("context.md"),
+                ))))
+            }
             Action::Statistics(detail) => {
                 actions.push("statistics".into());
                 let stat = |path: &str, added| mrde_core::models::FileStat {
@@ -2201,3 +2233,5 @@ mod ask;
 mod projects;
 
 mod scrolling;
+
+mod risk;

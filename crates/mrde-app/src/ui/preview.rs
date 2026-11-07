@@ -9,6 +9,7 @@ use std::time::Instant;
 
 pub(super) fn tab(key: &str) -> DetailTab {
     match key {
+        "changes" => DetailTab::Changes,
         "files" => DetailTab::Files,
         "review" => DetailTab::Review,
         "statistics" => DetailTab::Statistics,
@@ -111,6 +112,8 @@ impl Cockpit {
             let fresh = argument == "fresh" || std::env::var("MRDE_SCENARIO_FRESH").is_ok();
             if !fresh {
                 let id = detail.mr.id.clone();
+                this.risk = Some((id.clone(), Box::new(demo::risk(&detail))));
+                this.risk_baseline = Some((id.clone(), demo::baseline()));
                 this.insights = Some((id.clone(), Box::new(demo::insights(&detail))));
                 this.tour = Some((id.clone(), detail.mr.sha.clone(), demo::tour()));
                 if let Ok(report) = demo::visual() {

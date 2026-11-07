@@ -5,7 +5,7 @@ pub mod scorers;
 use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
 use config::RiskConfig;
-use futures_util::{StreamExt, stream};
+use futures_util::{FutureExt, StreamExt, stream};
 use mrde_core::{
     models::{DiffStats, StatsSource},
     risk::*,
@@ -55,7 +55,15 @@ pub trait RiskScorer: Send + Sync {
 }
 /// Collect commit data off the UI thread. Lint/complexity receive disposable exports;
 /// local modifications, the Git index, and the MR worktree are never changed.
-pub async fn context(
+pub fn context<'a>(
+    worktree: &'a Path,
+    base: &'a str,
+    head: &'a str,
+    config: RiskConfig,
+) -> futures_util::future::BoxFuture<'a, Result<MrContext>> {
+    context_impl(worktree, base, head, config).boxed()
+}
+async fn context_impl(
     worktree: &Path,
     base: &str,
     head: &str,
@@ -97,7 +105,9 @@ pub async fn context(
         ctx.contents_error =
             Some("More than 1000 changed files; content analysis is unavailable".into());
     } else {
-        let results = stream::iter(&ctx.files)
+        let pending = ctx
+            .files
+            .iter()
             .map(|f| async {
                 let before = match &f.old_path {
                     Some(p) => mrde_git::show_file(worktree, &ctx.base_sha, p).await?,
@@ -115,6 +125,8 @@ pub async fn context(
                 );
                 Ok::<_, anyhow::Error>((f.path().to_string(), (before, after)))
             })
+            .collect::<Vec<_>>();
+        let results = stream::iter(pending)
             .buffer_unordered(8)
             .collect::<Vec<_>>()
             .await;
@@ -128,7 +140,19 @@ pub async fn context(
         }
     }
     if let Some(path) = ctx.config.coverage_file(worktree) {
-        match tokio::task::spawn_blocking(move || std::fs::read_to_string(path)).await? {
+        match tokio::task::spawn_blocking(move || {
+            use std::io::Read;
+            let mut text = String::new();
+            std::fs::File::open(path)?
+                .take(16 * 1024 * 1024 + 1)
+                .read_to_string(&mut text)?;
+            if text.len() > 16 * 1024 * 1024 {
+                return Err(std::io::Error::other("Coverage report exceeds 16 MiB"));
+            }
+            Ok::<_, std::io::Error>(text)
+        })
+        .await?
+        {
             Ok(text) => {
                 ensure!(
                     text.len() <= 16 * 1024 * 1024,
@@ -154,7 +178,10 @@ pub async fn context(
     }
     Ok(ctx)
 }
-pub async fn analyze(ctx: MrContext) -> RiskReport {
+pub fn analyze(ctx: MrContext) -> futures_util::future::BoxFuture<'static, RiskReport> {
+    analyze_impl(ctx).boxed()
+}
+async fn analyze_impl(ctx: MrContext) -> RiskReport {
     use scorers::*;
     let scorers: Vec<Box<dyn RiskScorer>> = vec![
         Box::new(DiffScorer),
@@ -166,7 +193,8 @@ pub async fn analyze(ctx: MrContext) -> RiskReport {
         Box::new(LintScorer),
         Box::new(DebtScorer),
     ];
-    let results = stream::iter(scorers)
+    let pending = scorers
+        .into_iter()
         .map(|scorer| {
             let ctx = &ctx;
             async move {
@@ -193,6 +221,8 @@ pub async fn analyze(ctx: MrContext) -> RiskReport {
                 }
             }
         })
+        .collect::<Vec<_>>();
+    let results = stream::iter(pending)
         .buffer_unordered(8)
         .collect::<Vec<_>>()
         .await;

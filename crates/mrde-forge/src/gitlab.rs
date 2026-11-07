@@ -303,17 +303,27 @@ impl GitLab {
 
 #[async_trait]
 impl Forge for GitLab {
-    async fn merged_history(&self, project:u64, limit:usize)->anyhow::Result<Vec<MrId>> {
-        anyhow::ensure!((1..=200).contains(&limit),"Baseline size must be 1–200");
-        #[derive(Deserialize)] struct Entry { iid:u64 }
-        let mut result=Vec::new();
-        for page in 1..=limit.div_ceil(100) {
-            let per_page=limit.min(100);
-            let entries:Vec<Entry>=self.get(&format!("projects/{project}/merge_requests?state=merged&order_by=merged_at&sort=desc&per_page={per_page}&page={page}")).await?;
-            let count=entries.len();result.extend(entries.into_iter().map(|e|MrId{project,iid:e.iid}));
-            if count<per_page {break;}
+    async fn merged_history(&self, project: u64, limit: usize) -> anyhow::Result<Vec<MrId>> {
+        anyhow::ensure!((1..=200).contains(&limit), "Baseline size must be 1–200");
+        #[derive(Deserialize)]
+        struct Entry {
+            iid: u64,
         }
-        result.truncate(limit);Ok(result)
+        let mut result = Vec::new();
+        for page in 1..=limit.div_ceil(100) {
+            let per_page = limit.min(100);
+            let entries:Vec<Entry>=self.get(&format!("projects/{project}/merge_requests?state=merged&order_by=merged_at&sort=desc&per_page={per_page}&page={page}")).await?;
+            let count = entries.len();
+            result.extend(entries.into_iter().map(|e| MrId {
+                project,
+                iid: e.iid,
+            }));
+            if count < per_page {
+                break;
+            }
+        }
+        result.truncate(limit);
+        Ok(result)
     }
 
     async fn resolver_target(
@@ -696,6 +706,27 @@ impl Forge for GitLab {
 mod tests {
     use super::*;
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::*};
+    #[tokio::test]
+    async fn baseline_lists_merged_repository_mrs_in_merge_time_order() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v4/projects/7/merge_requests"))
+            .and(query_param("state", "merged"))
+            .and(query_param("order_by", "merged_at"))
+            .and(query_param("sort", "desc"))
+            .and(query_param("per_page", "2"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{"iid":9},{"iid":3}])),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let forge = GitLab::new(&server.uri(), "fixture-token", &[]).unwrap();
+        assert_eq!(
+            forge.merged_history(7, 2).await.unwrap(),
+            vec![MrId { project: 7, iid: 9 }, MrId { project: 7, iid: 3 }]
+        );
+    }
     fn resolver_target_fixture() -> mrde_core::resolver::ResolverTarget {
         mrde_core::resolver::ResolverTarget {
             id: MrId { project: 1, iid: 2 },
