@@ -5,7 +5,7 @@ use mrde_core::{
     insights::{Insights, Tour, VisualReport},
     models::*,
 };
-use mrde_forge::{Forge, gitlab::GitLab};
+use mrde_forge::{Forge, github::GitHub, gitlab::GitLab};
 use mrde_git::{WorktreeEntry, Worktrees};
 use mrde_store::{Store, read_secret};
 use std::{
@@ -183,10 +183,10 @@ impl SystemExecutor {
         {
             return Ok(forge.clone());
         }
-        let forge: Arc<dyn Forge> = Arc::new({
+        let forge = {
             let config = config.clone();
             tokio::task::spawn_blocking(move || connect(&config)).await??
-        });
+        };
         *self.forge.lock().unwrap_or_else(|e| e.into_inner()) = Some((url, forge.clone()));
         Ok(forge)
     }
@@ -393,17 +393,22 @@ impl Forge for Offline {
     }
 }
 
-fn connect(config: &Config) -> anyhow::Result<GitLab> {
+fn connect(config: &Config) -> anyhow::Result<Arc<dyn Forge>> {
     config.validate_project()?;
-    anyhow::ensure!(
-        config.provider.available(),
-        "GitHub connector is not available yet. You can configure this project in Settings."
-    );
     let key = config.credential_key();
     let url = &key;
+    // Both providers keep their token under the historical `gitlab-token` name.
     let token = read_secret(url, "gitlab-token")?;
     if token.is_empty() {
-        anyhow::bail!("Configure your GitLab token in Settings first");
+        anyhow::bail!(
+            "Configure your {} token in Settings first",
+            config.provider.label()
+        );
+    }
+    if config.provider == mrde_core::config::Provider::Github {
+        return Ok(Arc::new(
+            GitHub::new(&config.gitlab_url, &token)?.with_group(&config.group),
+        ));
     }
     let id = read_secret(url, "cf-id")?;
     let secret = read_secret(url, "cf-secret")?;
@@ -414,7 +419,9 @@ fn connect(config: &Config) -> anyhow::Result<GitLab> {
     if !secret.is_empty() {
         headers.push(("CF-Access-Client-Secret".into(), secret));
     }
-    Ok(GitLab::new(&config.gitlab_url, &token, &headers)?.with_group(&config.group))
+    Ok(Arc::new(
+        GitLab::new(&config.gitlab_url, &token, &headers)?.with_group(&config.group),
+    ))
 }
 
 pub fn load_projects() -> anyhow::Result<crate::projects::Projects> {

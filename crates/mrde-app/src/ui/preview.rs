@@ -181,6 +181,17 @@ impl Cockpit {
     /// `open` scenario shows the "Open MR…" dialog with a reference.
     pub(super) fn apply_preview_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.project_inputs(&self.config.clone(), window, cx);
+        // `settings:github`: the settings of the GitHub project.
+        if std::env::var("MRDE_SCENARIO").as_deref() == Ok("settings:github")
+            && let Some(mut project) = self
+                .projects
+                .iter()
+                .find(|p| p.provider == mrde_core::config::Provider::Github)
+                .cloned()
+        {
+            project.group = "acme/platform".into();
+            self.project_inputs(&project, window, cx);
+        }
         if let Ok(query) = std::env::var("MRDE_SCENARIO_SEARCH") {
             self.search
                 .update(cx, |input, cx| input.set_value(query.clone(), window, cx));

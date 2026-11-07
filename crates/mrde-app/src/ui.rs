@@ -865,7 +865,7 @@ impl Cockpit {
                         mr.approvals = count;
                     }
                     self.confirm = false;
-                    self.status = "Approved on GitLab.".into();
+                    self.status = format!("Approved on {}.", self.config.provider.label());
                 }
                 Ok(Outcome::Ask(ready)) => {
                     // The thread belongs to its own MR; only show it if that MR is still open.
@@ -983,7 +983,11 @@ impl Cockpit {
         }
         self.last_refresh = Instant::now();
         let generation = self.generation;
-        self.start(Action::Refresh, "Refreshing GitLab merge requests…", cx);
+        let message = format!(
+            "Refreshing {} merge requests…",
+            self.config.provider.label()
+        );
+        self.start(Action::Refresh, &message, cx);
         if self.generation != generation {
             self.automatic = automatic;
         }
@@ -1315,9 +1319,9 @@ impl Cockpit {
             .child(div().text_sm().text_color(rgb(MUTED)).mb_8().child("Connect your review workspace."))
             .child(field("Project name", "A name for this review workspace.", &self.project_name, "project-name"))
             .child(row("Provider", "Choose the service that hosts your code.", self.provider_control(cx)))
-            .when(!self.draft_provider.available(), |d| d.child(div().text_sm().text_color(rgb(MUTED)).pb_4().child("GitHub connector coming later. You can save this profile; pull requests and connection testing are not available yet.")))
+            .when(self.draft_provider == mrde_core::config::Provider::Github, |d| d.child(div().debug_selector(|| "github-hint".into()).text_sm().text_color(rgb(MUTED)).pb_4().child("Use https://github.com or your GitHub Enterprise Server address. The token needs read access to pull requests, contents, issues, and checks, and write access to pull requests to approve.")))
             .child(field("Instance URL", "The base URL of your forge.", &self.url, "gitlab-url"))
-            .child(field("Group / organization", "Optional path, for example team/platform. GitLab includes subgroups.", &self.project_group, "project-group"))
+            .child(field("Group / organization", if self.draft_provider == mrde_core::config::Provider::Github { "Optional owner or repository, for example acme or acme/platform." } else { "Optional path, for example team/platform. GitLab includes subgroups." }, &self.project_group, "project-group"))
             .child(field("Refresh interval", "Seconds between refreshes, at least 30.", &self.project_refresh, "project-refresh"))
             .child(field("Claude executable", "Command or full path to Claude Code.", &self.project_claude, "project-claude"))
             .child(field("Personal access token", "API access for merge requests and approvals.", &self.token, "gitlab-token"))
@@ -1326,6 +1330,8 @@ impl Cockpit {
             .child(div().text_size(px(15.)).text_color(rgb(HEADING)).font_weight(FontWeight::MEDIUM).mt_6().mb_2().child("Compliance"))
             .child(field("Specification folder", "Folder searched by the compliance check, for example my-project/specs.", &self.spec_path, "spec-path"))
             .child(field("Screenshot command", "Optional. Runs in the base and MR worktrees and writes PNG files to $MRDE_SCREENSHOTS_DIR for the visual comparison.", &self.visual_command, "visual-command"))
+            // Cloudflare Access service tokens are sent to GitLab instances only.
+            .when(self.draft_provider == mrde_core::config::Provider::Gitlab, |d| d
             .child(div().h(px(1.)).bg(rgb(LINE)).my_3())
             .child(div().text_size(px(15.)).text_color(rgb(HEADING)).font_weight(FontWeight::MEDIUM).mt_6().mb_2().child("Cloudflare Access"))
             .child(div().text_sm().text_color(rgb(MUTED)).mb_2().child("Optional service token for instances behind Zero Trust."))
@@ -1333,7 +1339,7 @@ impl Cockpit {
             .child(field("Client secret", "CF-Access-Client-Secret", &self.cf_secret, "cf-secret"))
             .child(div().flex().justify_end().pb_5().child(Button::new("clear-cf").ghost().small()
                 .label(if self.clear_cloudflare { "Undo removal of saved Cloudflare credentials" } else { "Remove saved Cloudflare credentials" })
-                .disabled(busy).on_click(cx.listener(|this, _, _, cx| { this.clear_cloudflare = !this.clear_cloudflare; cx.notify(); }))))
+                .disabled(busy).on_click(cx.listener(|this, _, _, cx| { this.clear_cloudflare = !this.clear_cloudflare; cx.notify(); })))))
             ;
         let mut controls = div()
             .flex_shrink_0()

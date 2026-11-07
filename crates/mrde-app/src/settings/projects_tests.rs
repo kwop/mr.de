@@ -98,7 +98,8 @@ async fn profiles_on_the_same_host_never_inherit_tokens_and_preferences_stay_loc
     assert!(!toml.contains("first-token") && !toml.contains("second-token"));
 }
 #[tokio::test]
-async fn github_profile_saves_without_http_and_testing_reports_unavailable() {
+async fn github_profile_saves_without_http_and_tests_against_the_github_api() {
+    use wiremock::{Mock, ResponseTemplate, matchers::*};
     let server = wiremock::MockServer::start().await;
     let directory = tempfile::tempdir().unwrap();
     let service = SettingsService {
@@ -111,13 +112,24 @@ async fn github_profile_saves_without_http_and_testing_reports_unavailable() {
             name: "Community".into(),
             provider: mrde_core::config::Provider::Github,
             gitlab_url: server.uri(),
+            group: "acme/platform".into(),
             ..Default::default()
         },
         ..Default::default()
     };
-    service.save(draft.clone(), Arc::new(|_| {})).await.unwrap();
-    let error = service.test(draft, Arc::new(|_| {})).await.unwrap_err();
-    assert!(error.to_string().contains("not available yet"));
+    let missing = service
+        .save(draft.clone(), Arc::new(|_| {}))
+        .await
+        .unwrap_err();
+    assert!(
+        missing.to_string().contains("Enter a GitHub token"),
+        "{missing}"
+    );
+    let with_token = Draft {
+        token: "synthetic-token".into(),
+        ..draft.clone()
+    };
+    service.save(with_token, Arc::new(|_| {})).await.unwrap();
     assert!(server.received_requests().await.unwrap().is_empty());
     assert_eq!(
         Projects::load(directory.path())
@@ -126,5 +138,39 @@ async fn github_profile_saves_without_http_and_testing_reports_unavailable() {
             .unwrap()
             .provider,
         mrde_core::config::Provider::Github
+    );
+
+    Mock::given(method("GET"))
+        .and(path("/api/v3/user"))
+        .and(header("authorization", "Bearer synthetic-token"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "reviewer"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v3/repos/acme/platform"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": 42})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let steps = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let progress = steps.clone();
+    // A blank token field uses the saved one.
+    let user = service
+        .test(
+            draft,
+            Arc::new(move |step| progress.lock().unwrap().push(step)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(user, "reviewer");
+    assert!(
+        steps
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|step| step.contains("connecting to GitHub"))
     );
 }

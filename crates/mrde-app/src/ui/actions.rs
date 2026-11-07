@@ -133,7 +133,7 @@ impl Cockpit {
                     .h(px(32.))
                     .ghost()
                     .icon(gpui_component::IconName::ExternalLink)
-                    .tooltip("Open in GitLab")
+                    .tooltip(format!("Open in {}", self.config.provider.label()))
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(detail) = &this.detail {
                             cx.open_url(&detail.mr.web_url);
@@ -175,11 +175,11 @@ impl Cockpit {
                                 .disabled(busy)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(detail) = this.detail.clone() {
-                                        this.start(
-                                            Action::Approve(detail),
-                                            "Approving on GitLab…",
-                                            cx,
+                                        let message = format!(
+                                            "Approving on {}…",
+                                            this.config.provider.label()
                                         );
+                                        this.start(Action::Approve(detail), &message, cx);
                                     }
                                 })),
                         ),

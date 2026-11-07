@@ -225,6 +225,7 @@ impl Cockpit {
             .rounded(px(RADIUS_CONTROL))
             .h(px(36.));
         let user = self.executor.username(&self.config);
+        let provider = self.config.provider.label();
         let avatar = div()
             .id("avatar")
             .debug_selector(|| "avatar".into())
@@ -242,7 +243,7 @@ impl Cockpit {
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(initials(&user))
                 .tooltip(move |window, cx| {
-                    Tooltip::new(format!("Signed in to GitLab as {user}")).build(window, cx)
+                    Tooltip::new(format!("Signed in to {provider} as {user}")).build(window, cx)
                 }),
             None => avatar
                 .text_color(rgb(SUBTLE))

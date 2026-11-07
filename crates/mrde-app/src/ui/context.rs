@@ -553,7 +553,7 @@ impl Cockpit {
                         ),
                     )
                     .tooltip(|window, cx| {
-                        Tooltip::new("Open the ticket in GitLab").build(window, cx)
+                        Tooltip::new("Open the ticket in the browser").build(window, cx)
                     })
                     .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))),
             );

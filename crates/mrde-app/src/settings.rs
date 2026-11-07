@@ -2,8 +2,8 @@
 use crate::projects::{CONFIG_LOCK, Projects};
 use anyhow::{Context, bail};
 use async_trait::async_trait;
-use mrde_core::config::{Config, MrRole, QueueSort, config_dir};
-use mrde_forge::{Forge, gitlab::GitLab};
+use mrde_core::config::{Config, MrRole, Provider, QueueSort, config_dir};
+use mrde_forge::{Forge, github::GitHub, gitlab::GitLab};
 use std::{path::PathBuf, sync::Arc};
 
 pub type Progress = Arc<dyn Fn(String) + Send + Sync>;
@@ -35,7 +35,10 @@ impl Draft {
             "Enter the Claude executable"
         );
         // Validate before accessing Keychain, including URLs containing credentials.
-        GitLab::new(&self.config.gitlab_url, "validation", &[])?;
+        match self.config.provider {
+            Provider::Gitlab => drop(GitLab::new(&self.config.gitlab_url, "validation", &[])?),
+            Provider::Github => drop(GitHub::new(&self.config.gitlab_url, "validation")?),
+        }
         if self.config.mr_roles.is_empty() {
             bail!("Select at least one role to choose which merge requests to show.");
         }
@@ -47,9 +50,17 @@ impl Draft {
         }
         Ok(self)
     }
-    fn client(&self) -> anyhow::Result<GitLab> {
+    fn client(&self) -> anyhow::Result<Client> {
         if self.token.is_empty() {
-            bail!("Enter a GitLab token, or save one before leaving this field blank.");
+            bail!(
+                "Enter a {} token, or save one before leaving this field blank.",
+                self.config.provider.label()
+            );
+        }
+        if self.config.provider == Provider::Github {
+            return Ok(Client::GitHub(
+                GitHub::new(&self.config.gitlab_url, &self.token)?.with_group(&self.config.group),
+            ));
         }
         if self.cf_id.is_empty() != self.cf_secret.is_empty() {
             bail!("Enter both Cloudflare service-token fields, or remove both.");
@@ -62,8 +73,33 @@ impl Draft {
                 ("CF-Access-Client-Secret".into(), self.cf_secret.clone()),
             ]
         };
-        Ok(GitLab::new(&self.config.gitlab_url, &self.token, &headers)?
-            .with_group(&self.config.group))
+        Ok(Client::GitLab(
+            GitLab::new(&self.config.gitlab_url, &self.token, &headers)?
+                .with_group(&self.config.group),
+        ))
+    }
+}
+
+/// The connection a draft describes, for testing it.
+enum Client {
+    GitLab(GitLab),
+    GitHub(GitHub),
+}
+impl Client {
+    /// The account name, after checking the group, owner, or repository scope.
+    async fn test(&self) -> anyhow::Result<String> {
+        match self {
+            Client::GitLab(client) => {
+                let user = client.test_connection().await?;
+                client.test_group().await?;
+                Ok(user)
+            }
+            Client::GitHub(client) => {
+                let user = client.test_connection().await?;
+                client.test_group().await?;
+                Ok(user)
+            }
+        }
     }
 }
 
@@ -198,15 +234,19 @@ impl ConnectionSettings for SettingsService {
         .await?
     }
     async fn test(&self, draft: Draft, progress: Progress) -> anyhow::Result<String> {
-        if !draft.config.provider.available() {
-            bail!("GitHub profiles can be saved, but the GitHub connector is not available yet.");
-        }
         let draft = self.resolve(draft, &progress).await?;
-        progress("GET /api/v4/user — connecting to GitLab (30s timeout)".into());
-        let client = draft.client()?;
-        let user = client.test_connection().await?;
-        client.test_group().await?;
-        progress("GitLab authentication succeeded; nothing has been saved".into());
+        let provider = draft.config.provider.label();
+        progress(format!(
+            "{} — connecting to {provider} (30s timeout)",
+            match draft.config.provider {
+                Provider::Gitlab => "GET /api/v4/user",
+                Provider::Github => "GET /user",
+            }
+        ));
+        let user = draft.client()?.test().await?;
+        progress(format!(
+            "{provider} authentication succeeded; nothing has been saved"
+        ));
         Ok(user)
     }
     async fn save(&self, draft: Draft, progress: Progress) -> anyhow::Result<Config> {
