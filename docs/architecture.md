@@ -13,7 +13,8 @@ binary); the other crates hold domain logic and adapters, independent of the UI.
 | `crates/mrde-claude` | Claude Code CLI bridge with strict response parsing, prompts, and the questions context. |
 | `crates/mrde-store` | Versioned SQLite cache and macOS Keychain access. |
 | `crates/mrde-resolver` | Bounded repair state machine, injected effects, durable session updates. |
-| `crates/mrde-checks` | Check definitions, merge rules, and result schema; no runner yet. |
+| `crates/mrde-checks` | Check definitions, merge rules, result schema, bounded subprocess runner. |
+| `crates/mrde-risk` | Local risk scorers, report parsing, layered configuration and per-axis timeouts. |
 
 ```mermaid
 flowchart TD
@@ -32,7 +33,10 @@ flowchart TD
     Resolver --> Store
     App --> Embedded["Embedded Ghostty terminal (Metal)"]
     App --> Store["mrde-store: SQLite and Keychain"]
-    App -. future runner .-> Checks["mrde-checks: check schema"]
+    App --> Risk["mrde-risk: local scorers"]
+    Risk --> Git
+    Risk --> Core
+    Risk --> Checks["mrde-checks: bounded runner"]
     Forge --> Core
     Git --> Core
     Claude --> Core
