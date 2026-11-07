@@ -56,7 +56,8 @@ Feature: Inspect an explainable risk profile
   Scenario: Explain a heuristic test-gap measurement
     Given no coverage report is available for the changed source files
     When I calculate risk
-    Then the test-gap axis uses the changed test-file to source-file ratio
+    Then the test-gap axis counts added source lines without a related test change
+    And changes to unrelated tests do not hide those lines
     And its details identify this as an estimate rather than measured coverage
 
   @MRDE-RISK-006
