@@ -166,6 +166,7 @@ mod tests {
 
     fn mr(iid: u64, title: &str, labels: &[&str], ticket: &[&str]) -> MergeRequest {
         MergeRequest {
+            draft: false,
             risk: None,
             id: MrId { project: 1, iid },
             title: title.into(),

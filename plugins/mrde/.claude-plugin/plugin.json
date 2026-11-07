@@ -1,0 +1,17 @@
+{
+  "name": "mrde",
+  "version": "0.1.0",
+  "description": "Explainable local risk radar for committed changes or your working tree, on demand.",
+  "author": {
+    "name": "MR.DE contributors"
+  },
+  "homepage": "https://github.com/kwop/mr.de",
+  "repository": "https://github.com/kwop/mr.de",
+  "license": "MIT",
+  "keywords": [
+    "risk",
+    "review",
+    "git",
+    "radar"
+  ]
+}

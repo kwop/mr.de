@@ -49,6 +49,7 @@ mod tests {
     fn detail() -> MrDetail {
         MrDetail {
             mr: MergeRequest {
+                draft: false,
                 risk: None,
                 id: MrId { project: 1, iid: 2 },
                 title: "Title".into(),

@@ -15,6 +15,7 @@ to a test or Cucumber binding.
 | Approval | [UI tests](../crates/mrde-app/src/ui/tests.rs): `approval_requires_confirmation_and_sends_the_displayed_sha`; [GitHub mocks](../crates/mrde-forge/src/github/tests.rs): `approval_requires_the_reviewed_head_and_sends_that_commit` |
 | Analysis | [Insights](../crates/mrde-insights/src/lib.rs), [UI tests](../crates/mrde-app/src/ui/tests.rs): `analysis_of_another_commit_is_never_displayed`, `tour_and_screenshots_run_only_on_click_and_only_when_configured` |
 | Risk radar | [Scorers and temporary Git integration](../crates/mrde-risk/src/tests.rs), [normalization/median/verdict](../crates/mrde-core/src/risk.rs), [risk UI](../crates/mrde-app/src/ui/tests/risk.rs) |
+| Radar CLI and plugin | [Actual CLI and scan integration](../crates/mrde-radar/tests/scan.rs); `claude plugin validate` checks packaging, not model behavior |
 | Resolver | [State machine](../crates/mrde-resolver/src/tests.rs), [UI tests](../crates/mrde-app/src/ui/tests.rs): `persisted_active_threads_require_manual_resume_after_relaunch` |
 | Worktrees | [Git tests](../crates/mrde-git/src/lib.rs), [UI tests](../crates/mrde-app/src/ui/tests.rs): `worktrees_page_lists_worktrees_and_cleans_only_clean_ones` |
 | UI contract | [Chrome layouts](../crates/mrde-app/src/ui/tests/chrome.rs), [scrolling](../crates/mrde-app/src/ui/tests/scrolling.rs), [native story catalog](ui/catalog.toml) |

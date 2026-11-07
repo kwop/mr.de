@@ -88,6 +88,9 @@ pub fn init(cx: &mut App) {
     theme.title_bar = rgb(PAGE).into();
     theme.title_bar_border = rgb(PANEL_LINE).into();
     theme.success = rgb(SUCCESS).into();
+    theme.success_hover = rgb(0x86d9a6).into();
+    theme.success_active = rgb(0x50b879).into();
+    theme.success_foreground = rgb(PAGE).into();
     theme.danger = rgb(ERROR).into();
     theme.warning = rgb(WARNING).into();
     theme.link = rgb(INFO).into();

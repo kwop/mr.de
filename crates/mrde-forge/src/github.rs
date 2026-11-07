@@ -179,6 +179,7 @@ impl GqlPull {
             })
             .unwrap_or_default();
         let mut mr = MergeRequest {
+            draft: self.is_draft,
             risk: None,
             id: MrId {
                 project: self.repository.database_id,
@@ -469,9 +470,7 @@ impl GitHub {
             let search = data["search"].take();
             for node in search["nodes"].as_array().into_iter().flatten() {
                 // Other result types are empty objects.
-                if let Ok(pull) = serde_json::from_value::<GqlPull>(node.clone())
-                    && !pull.is_draft
-                {
+                if let Ok(pull) = serde_json::from_value::<GqlPull>(node.clone()) {
                     result.push(pull.into_model().0);
                 }
             }
@@ -565,8 +564,7 @@ impl Forge for GitHub {
                 MrRole::Author => &["author"],
             };
             for filter in filters {
-                let query =
-                    format!("is:pr is:open draft:false archived:false {filter}:{user} {scope}");
+                let query = format!("is:pr is:open archived:false {filter}:{user} {scope}");
                 for mr in self.search(query.trim()).await? {
                     if seen.insert(mr.id.clone()) {
                         self.remember(&mr);

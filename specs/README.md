@@ -18,6 +18,7 @@ scenario names a provider, **request** means a GitLab merge request or GitHub pu
 | [Approval](features/approval.feature) | Confirmation and reviewed-commit protection |
 | [Analysis](features/analysis.feature) | Structure, statistics, tours, compliance and screenshots |
 | [Risk radar](features/risk_radar.feature) | Measurements, n/a, medians, evidence and command approval |
+| [Radar CLI and plugin](features/radar_cli.feature) | Headless scans, snapshots, JSON, checks and explicit Claude invocation |
 | [Super Resolver](features/super_resolver.feature) | Bounded repair, handover and interruption |
 | [Worktrees](features/worktrees.feature) | Reuse and cleanup without losing local work |
 | [UI contract](features/ui_contract.feature) | Layout, status, responsiveness and preview isolation |

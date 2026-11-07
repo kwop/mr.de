@@ -517,6 +517,7 @@ mod tests {
         let head = commit(repo, "Mara", "feat: series").await;
         let detail = MrDetail {
             mr: MergeRequest {
+                draft: false,
                 risk: None,
                 id: MrId {
                     project: 1,

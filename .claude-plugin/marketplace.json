@@ -1,0 +1,17 @@
+{
+  "name": "mrde-tools",
+  "owner": {
+    "name": "MR.DE contributors"
+  },
+  "plugins": [
+    {
+      "name": "mrde",
+      "source": "./plugins/mrde",
+      "description": "Local risk radar powered by the same Rust engine as MR.DE.",
+      "version": "0.1.0"
+    }
+  ],
+  "metadata": {
+    "description": "MR.DE local code-review tools for Claude Code."
+  }
+}

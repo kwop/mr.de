@@ -20,8 +20,10 @@ License: MIT.
 - `crates/mrde-insights`: worktree analysis (symbols, impact, file graph, history, contracts,
   dependencies, patterns) and the screenshot comparison; pure functions plus `analyze()`.
 - `crates/mrde-claude`: Claude Code CLI bridge, strict response parsing, questions context.
-- `crates/mrde-checks`: check definitions, merge rules, standardized result schema; no runner.
+- `crates/mrde-checks`: check definitions, merge rules, standardized results and bounded execution of approved commands.
 - `crates/mrde-resolver`: bounded repair orchestration, pipeline polling, persisted Threads sessions.
+- `crates/mrde-risk`: local risk scorers and layered configuration.
+- `crates/mrde-radar`: public headless scan service, isolated snapshots and text/JSON/SVG CLI; `plugins/mrde` integrates it with Claude Code.
 - `crates/mrde-store`: versioned SQLite persistence and macOS Keychain access.
 
 ## Invariants
@@ -35,7 +37,7 @@ License: MIT.
 - Use the user's Claude Code installation/subscription, never an Anthropic API key.
 - Only exact numeric Px labels (`P0`, `P::0`) influence priority, from the MR or its primary ticket. Lower numbers rank higher; other labels never do.
 - Read the MR lists for the configured roles (reviewer and assignee by default; author is
-  optional; at least one is required), paginate, deduplicate, and exclude drafts.
+  optional; at least one is required), paginate, deduplicate, and label drafts explicitly.
 - Never put MR, issue, or diff text in process arguments; use stdin or a file outside the worktree.
 - Tokens and sensitive HTTP header values belong in Keychain, never files, SQLite, URLs, or logs.
 - Honor the user's SSH/Cloudflare setup. Do not rewrite SSH configuration.
@@ -60,6 +62,9 @@ only the configured executable and validated session UUID, never MR text. Keep d
 ```sh
 python3 scripts/bootstrap-ghostty.py  # Zig 0.16.0; bootstrap requires Python 3.12+
 cargo run --locked -p mrde
+cargo run --locked -p mrde-radar -- --help
+cargo test --locked -p mrde-radar
+claude plugin validate plugins/mrde --strict
 cargo fmt --all --check
 cargo check --locked --workspace
 cargo test --locked --workspace

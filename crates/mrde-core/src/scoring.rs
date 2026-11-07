@@ -68,6 +68,9 @@ pub fn sort_queue(queue: &mut [MergeRequest], sort: QueueSort, now: DateTime<Utc
                     _ => score(b, now).cmp(&score(a, now)),
                 }
             }
+            QueueSort::Approvals => (a.approvals.is_none(), a.approvals.unwrap_or_default())
+                .cmp(&(b.approvals.is_none(), b.approvals.unwrap_or_default()))
+                .then_with(|| score(b, now).cmp(&score(a, now))),
             QueueSort::Priority => score(b, now).cmp(&score(a, now)),
             QueueSort::Newest => b.created_at.cmp(&a.created_at),
             QueueSort::Oldest => a.created_at.cmp(&b.created_at),
@@ -144,6 +147,7 @@ mod tests {
     #[test]
     fn user_selected_sort_orders_queue() {
         let mr = |iid: u64, day: u32, lines: Option<u64>, labels: &[&str]| MergeRequest {
+            draft: false,
             risk: None,
             id: crate::models::MrId { project: 1, iid },
             title: String::new(),
@@ -161,11 +165,14 @@ mod tests {
             changed_lines: lines,
         };
         let now = "2026-02-01T00:00:00Z".parse().unwrap();
-        let base = [
+        let mut base = [
             mr(1, 10, Some(500), &[]),
             mr(2, 20, None, &["P0"]),
             mr(3, 5, Some(20), &[]),
         ];
+        for (mr, count) in base.iter_mut().zip([None, Some(2), Some(0)]) {
+            mr.approvals = count;
+        }
         let order = |sort| {
             let mut queue = base.clone();
             sort_queue(&mut queue, sort, now);
@@ -175,6 +182,24 @@ mod tests {
         assert_eq!(order(QueueSort::Newest), [2, 1, 3]);
         assert_eq!(order(QueueSort::Oldest), [3, 1, 2]);
         assert_eq!(order(QueueSort::Smallest), [3, 1, 2]);
+        assert_eq!(order(QueueSort::Approvals), [3, 2, 1]);
+        let mut tied = base.clone();
+        for (mr, count) in tied.iter_mut().zip([Some(1), Some(1), None]) {
+            mr.approvals = count;
+        }
+        sort_queue(&mut tied, QueueSort::Approvals, now);
+        assert_eq!(
+            tied.iter().map(|mr| mr.id.iid).collect::<Vec<_>>(),
+            [2, 1, 3]
+        );
+        for (mr, count) in tied.iter_mut().zip([None, Some(u64::MAX), Some(0)]) {
+            mr.approvals = count;
+        }
+        sort_queue(&mut tied, QueueSort::Approvals, now);
+        assert_eq!(
+            tied.iter().map(|mr| mr.id.iid).collect::<Vec<_>>(),
+            [3, 1, 2]
+        );
         let mut queue = base.clone();
         for (mr, value) in queue.iter_mut().zip([2., 9., 7.]) {
             mr.risk = Some(crate::risk::RiskSummary {

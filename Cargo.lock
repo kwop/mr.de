@@ -3836,6 +3836,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mrde-radar"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "mrde-core",
+ "mrde-git",
+ "mrde-risk",
+ "quick-xml",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "mrde-resolver"
 version = "0.1.0"
 dependencies = [

@@ -7,7 +7,8 @@ Feature: Triage the complete review queue
     Given a "<provider>" project with open, closed and draft requests
     And one open non-draft request matches both my reviewer and assignee roles
     When I refresh with Reviewer and Assignee selected
-    Then only open non-draft requests matching a selected role are listed
+    Then only open requests matching a selected role are listed
+    And draft requests have a visible "Draft" badge
     And the request matching both roles appears once
 
     Examples:
@@ -81,3 +82,19 @@ Feature: Triage the complete review queue
     When I view the queue or request details
     Then the scope "Review" uses the provider color
     And the value "Dev" uses an adjoining white segment with readable text
+
+  @MRDE-INBOX-011 @regression
+  Scenario: Sort by approval count without treating unknown counts as zero
+    Given requests with zero, one, two and unknown approval counts
+    When I choose Approvals sorting
+    Then requests are ordered by zero, one, two and unknown approvals across all pages
+    And equal counts use priority as the tie breaker
+    And the selected project remembers this sorting choice
+    And no provider request is made just to change the sort
+
+  @MRDE-INBOX-012
+  Scenario: Reorder the queue after approving a request
+    Given I use Approvals sorting and read a request with zero approvals
+    When I confirm its approval and the provider reports the new count
+    Then the request moves to its new position in the queue
+    And the reader stays on that request
