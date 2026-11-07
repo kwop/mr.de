@@ -6,14 +6,18 @@ own worktree with the `isolated-worktree` skill (`.agents/skills/isolated-worktr
 
 ## Product
 
-mr.de is a native Rust/GPUI desktop cockpit for reviewing GitLab merge requests.
+mr.de is a Rust review cockpit for GitLab merge requests and GitHub pull requests, with
+a GPUI desktop and a Ratatui terminal frontend.
 Cargo package/library/binary: `mrde`. macOS only for the initial release.
-All source, documentation, UI copy, prompts, and commit messages are English.
+Source, documentation and commit messages are English. UI and Claude information languages
+are independent English/French preferences; localization belongs in the shared catalog.
 License: MIT.
 
 ## Workspace
 
 - `crates/mrde-app`: GPUI views, runtime setup, application composition; package `mrde`.
+- `crates/mrde-service`: shared application executor, projects, settings and demo fixtures.
+- `crates/mrde-tui`: Ratatui/Crossterm frontend and synthetic renderer exports.
 - `crates/mrde-core`: serializable domain models, deterministic scoring, review workflow ports.
 - `crates/mrde-forge`: `Forge` abstraction and GitLab REST API v4 implementation.
 - `crates/mrde-git`: dedicated bare repositories, detached worktrees, and read-only Git queries.
@@ -73,7 +77,7 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo build --locked --release -p mrde
 ```
 
-Config: `~/.config/mrde/config.toml`. Global checks: `~/.config/mrde/checks.toml`.
+Config: `~/.config/mrde/projects.toml` (legacy `config.toml` is imported). Global checks: `~/.config/mrde/checks.toml`.
 Repository checks: `.mrde.toml`. Cache: `~/Library/Caches/mrde/`.
 
 Use mocked GitLab HTTP tests, temporary Git repositories, and synthetic Claude JSON.
@@ -96,3 +100,17 @@ shows (long titles, ticket labels, wide tables); capture the real application wi
 `MRDE_SNAPSHOT_REAL=1` only when the user has explicitly agreed, since it uses their saved
 credentials (read-only) and the images contain their merge requests. Read the GPUI 0.2.2 layout pitfalls in `docs/development.md` before
 writing rows with text: prefer `ellipsis()`, `min_w_0()`, and `flex_shrink_0()` controls.
+
+
+## Shared frontends and current references
+
+- `mrde-service` owns project/settings persistence and the injected application executor;
+  GPUI and the Ratatui/Crossterm `mrde-tui` both use it. Keep frontend types out of services.
+- Run `cargo run --locked -p mrde-tui -- --demo`; export the actual renderer with
+  `--screen radar --snapshot /tmp/tui-radar.svg`. The demo never runs Claude or reads secrets.
+- Independent global languages are in `projects.toml` under `[languages]`; shared copy is
+  in `mrde-core/locales/fr.json`. Translate controls, preserve repository text and JSON keys.
+- Every product change updates its Gherkin contracts and affected synthetic screenshots.
+  Record reproduction/provenance in `docs/images/README.md`; inspect both language layouts.
+  `python3 scripts/ui_catalog.py check` validates the native catalog. Never publish real MR
+  data. `AGENTS.md` is intentionally preserved.

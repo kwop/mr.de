@@ -109,21 +109,25 @@ flowchart LR
   Plugin[Claude Code skill] --> CLI[mrde-radar binary]
   CLI --> Service[scan application service]
   Service --> Risk[mrde-risk]
-  Desktop[GPUI desktop] --> Risk
+  Desktop[GPUI desktop] --> App[mrde-service]
+  TUI[Ratatui terminal] --> App
+  App --> Risk
   Risk --> Core[mrde-core models]
   Risk --> Checks[Approved check executor]
   Service --> Git[Isolated local Git snapshot]
 ```
 
-This is the first frontend-independent application service. Extracting the desktop's queue,
-project/settings and review orchestration into common services, then adding a TUI, remains
-separate work. No desktop module is moved by this change.
+The desktop and [interactive terminal](tui.md) share `mrde-service` for project settings,
+queues, worktrees and review actions. The standalone `scan` API remains smaller: it accepts
+local Git input without requiring a configured forge or credentials.
 
 ## Claude Code
 
 The [plugin guide](../plugins/mrde/README.md) covers `/mrde:radar` installation and usage.
 The skill is manual and uses the existing conversation; it never starts a second Claude
 session. Packaging validation uses `claude plugin validate`, without a model request.
+The [recorded example](examples/claude-radar.md) separately documents a real plugin invocation
+on a synthetic repository, with its response and radar export.
 Integration tests exercise the actual CLI with temporary Git repositories, shared-engine
 parity, proposed commands, missing refs, coverage failures, linked worktrees and JSON/SVG.
 

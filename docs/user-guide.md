@@ -1,6 +1,7 @@
 # User guide
 
 - [Configuration](#configuration)
+- [Languages](#languages)
 - [Review workflow](#review-workflow)
 - [Queue, labels, and priority](#queue-labels-and-priority)
 - [Search, label filters, and opening any merge request](#search-label-filters-and-opening-any-merge-request)
@@ -51,6 +52,10 @@ Non-secret configuration lives in `~/.config/mrde/projects.toml`:
 version = 1
 active = "platform"
 
+[languages]
+interface = "en"
+information = "en"
+
 [[projects]]
 id = "platform"
 name = "Platform"
@@ -67,7 +72,7 @@ visual_command = ""
 [[projects]]
 id = "community"
 name = "Community"
-provider = "github" # profile only for now
+provider = "github"
 url = "https://github.com"
 group = "example-org"
 ```
@@ -88,6 +93,22 @@ group = "example-org"
   their originating project when you switch; return to it to inspect their results.
 - Restart after editing TOML. To remove a profile, remove its `[[projects]]` table and point
   `active` to a remaining ID. This does not delete Keychain entries or worktrees.
+
+## Languages
+
+Open **Languages** in the sidebar. Choose **Interface language** and **Claude response
+language** independently, then **Save languages**. Both support English and French and
+apply to every project and the [terminal frontend](tui.md). They default to English.
+This save does not test a connection or access Keychain, and failure preserves the choices.
+
+In TOML, use `[languages]` with `interface = "fr"` and `information = "en"` (or `"fr"`).
+Restart after editing the file. Application controls are translated; repository titles,
+labels, Markdown, code and external diagnostics keep their original wording. The response
+language affects new reviews, tours, compliance reports and Claude discussions. It does
+not translate an existing conversation. AI cache entries include the response language;
+local numeric risk profiles and team medians remain reusable.
+
+![French interface with independent response language](images/languages-fr.png)
 
 ## Review workflow
 
