@@ -48,6 +48,19 @@ checks executor in separate base/head exports. A new repository command is liste
 mrde-radar --run-checks --allow-command <fingerprint> --json
 ```
 
+When no explicit lint is configured, the changed files and their committed manifests
+produce proposed checks for the supported stacks. `autodetect_lint = false` disables this.
+To install supported tools and prepare dependencies for approved checks, use:
+
+```sh
+mrde-radar --run-checks --prepare-tools --allow-command <fingerprint> --json
+```
+
+This explicit setup may download packages; a normal scan never does. `--tool-cache <path>`
+changes the managed cache (also exposed as `ScanRequest.tool_cache`). SDKs must already be
+installed. See [automatic detection](risk.md#automatic-detection-and-setup) for supported
+recipes and lockfile requirements. The JSON report includes `setup_messages`.
+
 Approval is invocation-local and cannot come from `risk.toml` itself. An unknown or changed
 fingerprint fails before checks start. The CLI does not read desktop command approvals
 from SQLite. Commands can have their own external effects; disposable exports and offline
@@ -74,7 +87,8 @@ of the same computed report. Text strips control characters from repository/tool
 | `summary` | `Quick`/`Standard`/`Deep` verdict or null, mean or null, measured count, partial flag |
 | `report.profile` | Eight axes, raw metrics, normalized scores, evidence, reasons for n/a, SHAs and config fingerprint |
 | `report.stats`, `report.excluded` | Changed-file counts and paths excluded from scoring |
-| `report.pending_commands` | Unapproved command ID, argv and exact fingerprint |
+| `report.pending_commands` | Unapproved command ID, argv, package directory, preparation recipe and exact fingerprint |
+| `report.setup_messages` | Explicit preparation results and recovery guidance |
 | `baseline` | Null: standalone scans have no team median |
 | `warnings` | Method, coverage, snapshot and missing-history limitations |
 

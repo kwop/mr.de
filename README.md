@@ -105,6 +105,10 @@ For a signed `.app` with Touch ID support, see [macOS signing and Touch ID](docs
 
 ## Risk configuration
 
+Use **Detect and install tools** in Changes to detect linters from the modified code and
+prepare supported tools. Detected commands require **Allow, install and calculate**;
+ordinary scoring stays offline. See [tool setup](docs/risk.md#automatic-detection-and-setup).
+
 Copy [`config/risk.example.toml`](config/risk.example.toml) to `~/.config/mrde/risk.toml`.
 Override it per profile in `~/.config/mrde/projects/<id>/risk.toml` and per repository in
 `risk.toml`. The example documents all normalization curves, sensitive globs and weights,

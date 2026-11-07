@@ -166,3 +166,23 @@ fn changes_prompt_before_the_first_calculation(cx: &mut TestAppContext) {
     assert_eq!(actions(&executor, "risk"), 1);
     assert!(cx.debug_bounds("risk-summary").is_some());
 }
+
+#[gpui::test]
+fn risk_tools_are_prepared_only_when_the_setup_control_is_clicked(cx: &mut TestAppContext) {
+    let (executor, view, root, mut visual) = changes(cx);
+    let cx = &mut visual;
+    draw(&root, cx);
+    assert_eq!(actions(&executor, "risk-setup"), 0);
+    reveal("setup-risk-tools", &view, &root, cx);
+    finish(&view, &root, cx);
+    assert_eq!(actions(&executor, "risk-setup"), 1);
+    assert!(cx.update(|_, cx| view.read(cx).current_risk().is_some()));
+    assert!(
+        executor
+            .actions
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|a| !a.starts_with("ask"))
+    );
+}

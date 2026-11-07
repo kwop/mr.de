@@ -16,6 +16,7 @@ use std::{
 pub enum Action {
     Refresh,
     Risk(Box<MrDetail>),
+    SetupRiskTools(Box<MrDetail>),
     RiskBaseline(Box<MrDetail>),
     RiskFile(Box<MrDetail>, String),
     ApproveRiskCommand(Box<MrDetail>, String),
@@ -283,7 +284,9 @@ impl Executor for PreviewExecutor {
         // A short pause keeps loading states visible, as with a real instance.
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         Ok(match action {
-            Action::Risk(detail) | Action::ApproveRiskCommand(detail, _) => {
+            Action::Risk(detail)
+            | Action::SetupRiskTools(detail)
+            | Action::ApproveRiskCommand(detail, _) => {
                 Outcome::Risk(detail.mr.id.clone(), Box::new(demo::risk(&detail)))
             }
             Action::RiskBaseline(detail) => {
@@ -500,6 +503,7 @@ pub async fn run(env: &Env, config: Config, action: Action) -> anyhow::Result<Ou
     let forge = &env.forge;
     match action {
         Action::Risk(detail) => risk::calculate(env, &config, &detail).await,
+        Action::SetupRiskTools(detail) => risk::setup(env, &config, &detail).await,
         Action::RiskBaseline(detail) => risk::baseline(env, &config, &detail).await,
         Action::RiskFile(detail, path) => risk::file(env, &config, &detail, &path).await,
         Action::ApproveRiskCommand(detail, key) => {

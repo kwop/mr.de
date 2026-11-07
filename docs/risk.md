@@ -42,14 +42,47 @@ regexes, and verdict thresholds are rejected. Coverage paths are repository-rela
 Project IDs are the IDs in `projects.toml`, not GitLab repository IDs.
 
 Local command definitions are trusted. Commands introduced or changed by repository
-configuration remain **Proposed** until **Allow and calculate** approves their exact
+configuration remain **Proposed** until **Allow, install and calculate** approves their exact
 argument vector and parser. Approval is scoped to the MR.DE project. Programs receive
-arguments directly, without an implicit shell. Install Lizard yourself or configure its
-absolute executable path; a missing executable leaves complexity unavailable.
+arguments directly, without an implicit shell. An absolute executable path can still be
+configured; ordinary calculations never download tools or dependencies.
+
+## Automatic detection and setup
+
+Select **Detect and install tools** in Changes. MR.DE reads the **changed code in the
+reviewed commit**, finds its package manifests, and proposes appropriate lint commands.
+It does not execute CI scripts or infer arbitrary `npm run lint` commands. Monorepos can
+produce several proposals; untouched packages are not selected. Explicit `[[lint]]`
+definitions take precedence; `autodetect_lint = false` disables detection.
+
+| Changed code | Detected check | Preparation after approval |
+| --- | --- | --- |
+| Rust + Cargo.toml | Clippy JSON | Install Clippy for an existing Rust toolchain; fetch locked dependencies |
+| Dart/Flutter + pubspec.yaml | Dart machine diagnostics | Fetch packages using pubspec.lock and the existing SDK |
+| JavaScript/TypeScript + declared ESLint | ESLint JSON | npm ci with lifecycle scripts disabled; requires an npm lockfile |
+| Go + go.mod | go vet JSON | Download module dependencies using the existing Go SDK |
+| Python | Ruff JSON | Install a pinned Ruff wheel in the managed cache |
+
+Lizard is installed in an isolated Python environment under the MR.DE cache, then reused.
+Ruff uses its own environment. Existing user tools are detected even when Finder's PATH
+omits Homebrew, ~/.local/bin, ~/.cargo/bin or the default FVM SDK. No shell profile is
+modified. Python 3 and the applicable language SDK must already exist; MR.DE does not
+silently install a full SDK or substitute a different package manager.
+
+Detected checks stay **Proposed**. **Allow, install and calculate** approves their exact
+command, package directory, parser and preparation recipe, prepares both commit snapshots,
+then calculates the profile. Setup may download packages; the subsequent check uses offline
+package-manager settings. Lockfiles are required for npm, Cargo and Dart dependency setup.
+A failed installation is shown with a retry path and leaves the relevant axis n/a; other
+axes still finish. Cancellation stops the subprocess group. User worktrees are unchanged.
+
+Tool preparation is a separate action from **Calculate again** and background refresh.
+The CLI exposes the same explicit preparation through `--run-checks --prepare-tools`;
+proposed commands additionally require `--allow-command <fingerprint>`.
 
 Each external tool runs through `mrde-checks` in its own disposable base/head snapshots.
 Timeouts and cancellation kill its process group. Output is bounded; package-manager
-offline flags are set. No packages are installed automatically. Git, HTTP, disk reads,
+offline flags are set during scoring. Only explicit tool setup downloads packages. Git, HTTP, disk reads,
 and subprocesses stay off the GPUI thread. Scoring itself has no network client or Git
 fetch; initial worktree preparation uses the existing SSH workflow.
 

@@ -55,3 +55,8 @@ scan exit proves that tests passed, or that an estimated test gap is measured co
 If a graphical artifact is requested, the same scan supports `--format svg`. Write it only
 to the requested destination or a new temporary file; do not overwrite project files. The
 native GPUI interface is not needed. See the [plugin README](../../README.md) for installation and limitations.
+
+When the user explicitly requests tool installation, `--run-checks --prepare-tools` may
+prepare supported tools in MR.DE's cache. Explain that downloads may occur and include
+`--allow-command` only for exact detected commands the user has approved. Never enable
+preparation just because an axis is unavailable. Do not install SDKs or change a lockfile.

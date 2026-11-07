@@ -87,6 +87,14 @@ pub(super) async fn calculate(
     let path = prepare(env, config, detail).await?;
     let risk = config_for(env, config, &path)?;
     let context = mrde_risk::context(&path, &detail.mr.base_sha, &detail.mr.sha, risk).await?;
+    finish(env, config, detail, context).await
+}
+async fn finish(
+    env: &Env,
+    config: &Config,
+    detail: &MrDetail,
+    context: mrde_risk::MrContext,
+) -> anyhow::Result<Outcome> {
     let report = mrde_risk::analyze(context).await;
     let store = env.store()?;
     store.save_risk(&config.namespace(), &detail.mr.id, &report)?;
@@ -99,6 +107,17 @@ pub(super) async fn calculate(
     store.save_queue(&config.namespace(), &queue)?;
     Ok(Outcome::Risk(detail.mr.id.clone(), Box::new(report)))
 }
+pub(super) async fn setup(
+    env: &Env,
+    config: &Config,
+    detail: &MrDetail,
+) -> anyhow::Result<Outcome> {
+    let path = prepare(env, config, detail).await?;
+    let risk = config_for(env, config, &path)?;
+    let mut context = mrde_risk::context(&path, &detail.mr.base_sha, &detail.mr.sha, risk).await?;
+    mrde_risk::setup::prepare(&mut context, &env.cache).await;
+    finish(env, config, detail, context).await
+}
 pub(super) async fn approve_command(
     env: &Env,
     config: &Config,
@@ -107,18 +126,20 @@ pub(super) async fn approve_command(
 ) -> anyhow::Result<Outcome> {
     let path = prepare(env, config, detail).await?;
     let risk = config_for(env, config, &path)?;
-    anyhow::ensure!(
-        std::iter::once(&risk.complexity)
-            .chain(&risk.lint)
-            .any(|c| c.key() == key),
-        "The command changed. Recalculate risks before approving it."
-    );
+    let mut context = mrde_risk::context(&path, &detail.mr.base_sha, &detail.mr.sha, risk).await?;
+    let command = context
+        .config
+        .commands_mut()
+        .find(|c| c.key() == key)
+        .context("The command changed. Recalculate risks before approving it.")?;
+    command.approved = true;
     let store = env.store()?;
     let mut approvals: HashSet<String> = store.cached(&approvals_key(config))?.unwrap_or_default();
     approvals.insert(key.into());
     store.save_cached(&approvals_key(config), &approvals)?;
     drop(store);
-    calculate(env, config, detail).await
+    mrde_risk::setup::prepare(&mut context, &env.cache).await;
+    finish(env, config, detail, context).await
 }
 pub(super) async fn file(
     env: &Env,
