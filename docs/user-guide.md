@@ -409,3 +409,10 @@ terminals, and move it to **Closed threads**. Its worktree and session history r
 available, including after restarting MR.DE. **Reopen thread** returns it to the open
 list; use **Open terminal** or **Resume** explicitly to continue. **Close terminal**
 only closes the selected terminal and leaves the thread open.
+
+## Copy debug logs
+
+Open **Debug logs**, select text and press **Cmd+C** (macOS) or **Ctrl+C** (Linux),
+or use **Copy logs** to copy all retained entries. **Copied** confirms the action.
+The button copies the same redacted text shown in the drawer, including timestamps
+and line breaks. New entries reset the confirmation so you can copy an updated log.

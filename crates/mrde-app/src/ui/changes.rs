@@ -485,7 +485,7 @@ impl Cockpit {
             )
             .child(code(pending.command.join(" "), INK))
             .when(!pending.directory.is_empty(), |card| card.child(muted(format!("Package: {}", pending.directory))))
-            .when(pending.preparation.is_some(), |card| card.child(muted("Allowing this check also prepares its locked dependencies in isolated snapshots; downloads may be required.")))
+            .when_some(pending.preparation.clone(), |card, preparation| card.child(muted(format!("Dependency setup: {preparation}. Locked dependencies are prepared in isolated snapshots; downloads may be required."))))
             .child(muted(
                 "It runs without a shell in disposable snapshots of the base and head commits, only after you allow this exact command.",
             ))

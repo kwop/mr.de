@@ -44,6 +44,7 @@ pub struct Cockpit {
     feedback: String,
     feedback_error: bool,
     logs_open: bool,
+    logs_copied: bool,
     logs: std::collections::VecDeque<String>,
     progress_sender: mpsc::Sender<(u64, String)>,
     progress_receiver: mpsc::Receiver<(u64, String)>,
@@ -353,6 +354,7 @@ impl Cockpit {
             feedback: String::new(),
             feedback_error: false,
             logs_open: false,
+            logs_copied: false,
             logs: Default::default(),
             progress_sender,
             progress_receiver,
@@ -537,6 +539,7 @@ impl Cockpit {
         cx.notify();
     }
     fn log(&mut self, message: &str) {
+        self.logs_copied = false;
         if self.logs.len() >= 200 {
             self.logs.pop_front();
         }
@@ -1429,27 +1432,6 @@ impl Cockpit {
             .child(controls)
             .into_any_element()
     }
-    fn debug_panel(&self) -> AnyElement {
-        div()
-            .id("debug-log")
-            .debug_selector(|| "debug-panel".into())
-            .h(px(168.))
-            .flex_shrink_0()
-            .bg(rgb(QUEUE))
-            .rounded(px(RADIUS_SHEET))
-            .overflow_y_scroll()
-            .px_5()
-            .py_3()
-            .font_family(CODE_FONT)
-            .text_size(px(11.))
-            .text_color(rgb(MUTED))
-            .children(
-                self.logs
-                    .iter()
-                    .map(|line| div().py_1().child(line.clone())),
-            )
-            .into_any_element()
-    }
     fn queue_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut list = div()
             .id("queue")
@@ -2209,7 +2191,7 @@ impl Render for Cockpit {
             main = main.child(sheet);
         }
         if self.logs_open {
-            main = main.child(self.debug_panel());
+            main = main.child(self.debug_panel(window, cx));
         }
         let mut body = div()
             .flex()
@@ -2317,6 +2299,7 @@ mod actions;
 mod automation;
 mod chrome;
 mod context;
+mod debug;
 mod disktree;
 mod history;
 mod inbox;

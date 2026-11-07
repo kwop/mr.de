@@ -1,7 +1,10 @@
 //! Read committed manifests for the code changed by this MR. Never execute CI scripts.
 use crate::config::{Command, Preparation};
 use anyhow::Result;
-use std::{collections::BTreeSet, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 pub async fn lint_commands(
     worktree: &Path,
@@ -11,6 +14,7 @@ pub async fn lint_commands(
     let files = mrde_git::list_files(worktree, head).await?;
     let tracked: BTreeSet<_> = files.iter().map(String::as_str).collect();
     let mut roots = BTreeSet::new();
+    let mut javascript_packages = BTreeSet::new();
     for file in changed {
         let extension = Path::new(file)
             .extension()
@@ -55,6 +59,7 @@ pub async fn lint_commands(
                 }
             }
             if manifest == "package.json" {
+                javascript_packages.insert(root.to_string_lossy().into_owned());
                 // A workspace can declare ESLint once for all its packages.
                 for parent in &parents {
                     if tracked.contains(parent.join(manifest).to_string_lossy().as_ref()) {
@@ -72,8 +77,40 @@ pub async fn lint_commands(
         roots.len() <= 32,
         "More than 32 changed packages; configure explicit lint commands in risk.toml"
     );
+    let mut manifests = BTreeMap::new();
+    for (directory, manifest) in &roots {
+        if *manifest == "package.json" {
+            let path = Path::new(directory)
+                .join(manifest)
+                .to_string_lossy()
+                .into_owned();
+            if let Some(text) = mrde_git::show_file(worktree, head, &path).await? {
+                anyhow::ensure!(
+                    text.len() <= 1024 * 1024,
+                    "Manifest exceeds the 1 MiB detection limit"
+                );
+                manifests.insert(
+                    directory.clone(),
+                    serde_json::from_str::<serde_json::Value>(&text)?,
+                );
+            }
+        }
+    }
+    let committed_files = files.into_iter().collect();
     let mut commands = Vec::new();
     for (directory, manifest) in roots {
+        if manifest == "package.json"
+            && !javascript_packages.contains(&directory)
+            && !manifests.get(&directory).is_some_and(|manifest| {
+                javascript_packages.iter().any(|package| {
+                    Path::new(package)
+                        .strip_prefix(&directory)
+                        .is_ok_and(|relative| crate::javascript::owns_workspace(manifest, relative))
+                })
+            })
+        {
+            continue;
+        }
         let path = Path::new(&directory)
             .join(manifest)
             .to_string_lossy()
@@ -85,6 +122,7 @@ pub async fn lint_commands(
             text.len() <= 1024 * 1024,
             "Manifest exceeds the 1 MiB detection limit"
         );
+        let mut preparation_directory = None;
         let spec = match manifest {
             "Cargo.toml" => Some((
                 "clippy",
@@ -117,18 +155,30 @@ pub async fn lint_commands(
                 let eslint = ["dependencies", "devDependencies"]
                     .iter()
                     .any(|key| package[key].get("eslint").is_some());
+                let preparation =
+                    match crate::javascript::resolve(&directory, &manifests, &committed_files) {
+                        Ok((owner, preparation)) => {
+                            preparation_directory = Some(owner);
+                            preparation
+                        }
+                        Err(_) => Preparation::JavaScript,
+                    };
                 // Never infer an npm script: it may fix files, run tests, or install packages.
                 eslint.then_some((
                     "eslint",
                     vec![
-                        "node",
+                        if preparation == Preparation::Bun {
+                            "bun"
+                        } else {
+                            "node"
+                        },
                         "node_modules/eslint/bin/eslint.js",
                         "--format",
                         "json",
                         ".",
                     ],
                     "eslint",
-                    Preparation::Npm,
+                    preparation,
                 ))
             }
             "go.mod" => Some((
@@ -146,10 +196,18 @@ pub async fn lint_commands(
             _ => None,
         };
         if let Some((id, argv, format, preparation)) = spec {
-            if preparation == Preparation::Npm
+            if manifest == "package.json"
                 && commands.iter().any(|c: &Command| {
-                    c.preparation == Some(Preparation::Npm)
+                    c.format == "eslint"
+                        && c.preparation == Some(preparation)
+                        && c.preparation_directory == preparation_directory
                         && Path::new(&directory).starts_with(&c.directory)
+                        && manifests.get(&c.directory).is_some_and(|parent| {
+                            crate::javascript::owns_workspace(
+                                parent,
+                                Path::new(&directory).strip_prefix(&c.directory).unwrap(),
+                            )
+                        })
                 })
             {
                 continue;
@@ -164,6 +222,7 @@ pub async fn lint_commands(
                 format: format.into(),
                 directory,
                 preparation: Some(preparation),
+                preparation_directory,
                 approved: false,
                 ..Command::default()
             });

@@ -29,6 +29,7 @@ impl Environment {
             directories.extend([
                 home.join(".local/bin"),
                 home.join(".cargo/bin"),
+                home.join(".bun/bin"),
                 home.join("fvm/default/bin"),
             ]);
         }
@@ -92,6 +93,10 @@ mod tests {
         assert!(
             env.directories
                 .contains(&PathBuf::from("/opt/homebrew/bin"))
+        );
+        assert!(
+            env.directories
+                .contains(&PathBuf::from("/users/test/.bun/bin"))
         );
         assert!(env.directories.iter().all(|p| p.is_absolute()));
         assert_eq!(

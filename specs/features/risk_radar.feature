@@ -122,3 +122,24 @@ Feature: Inspect an explainable risk profile
     And progress and setup results remain visible without blocking navigation
     And setup cancellation or failure leaves the affected axis unavailable
     And ordinary calculation and refresh do not download packages
+
+  @MRDE-RISK-014 @regression
+  Scenario Outline: Use the committed JavaScript package manager
+    Given the changed code uses ESLint and a committed "<lockfile>"
+    When I allow the detected lint command and install its tools
+    Then MR.DE uses "<manager>" with a frozen lockfile and lifecycle scripts disabled
+    And a workspace installs from its owning root
+    And the source worktree and lockfile remain unchanged
+
+    Examples:
+      | lockfile          | manager |
+      | bun.lock          | Bun     |
+      | bun.lockb         | Bun     |
+      | package-lock.json | npm     |
+
+  @MRDE-RISK-015 @regression
+  Scenario: Explain an ambiguous or unsupported JavaScript setup
+    Given JavaScript lockfiles conflict or identify an unsupported package manager
+    When I prepare the detected lint command
+    Then MR.DE explains the package-manager issue without substituting npm
+    And the other risk axes can still finish

@@ -175,6 +175,8 @@ impl Cockpit {
                 for line in [
                     "Loading MR details…",
                     "OK  MR loaded. Pre-review runs only on click.",
+                    "Bun workspace detected in packages/web; dependencies use the repository lockfile.",
+                    "Diagnostic: <path> & `value` remain literal.\n    Retry setup after checking the lockfile.",
                 ] {
                     self.log(line);
                 }

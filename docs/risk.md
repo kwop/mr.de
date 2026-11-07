@@ -59,22 +59,36 @@ definitions take precedence; `autodetect_lint = false` disables detection.
 | --- | --- | --- |
 | Rust + Cargo.toml | Clippy JSON | Install Clippy for an existing Rust toolchain; fetch locked dependencies |
 | Dart/Flutter + pubspec.yaml | Dart machine diagnostics | Fetch packages using pubspec.lock and the existing SDK |
-| JavaScript/TypeScript + declared ESLint | ESLint JSON | npm ci with lifecycle scripts disabled; requires an npm lockfile |
+| JavaScript/TypeScript + declared ESLint | ESLint JSON with the detected runtime | Bun frozen install or npm ci, with lifecycle scripts disabled and the committed lockfile |
 | Go + go.mod | go vet JSON | Download module dependencies using the existing Go SDK |
 | Python | Ruff JSON | Install a pinned Ruff wheel in the managed cache |
 
 Lizard is installed in an isolated Python environment under the MR.DE cache, then reused.
 Ruff uses its own environment. Existing user tools are detected even when Finder's PATH
-omits Homebrew, ~/.local/bin, ~/.cargo/bin or the default FVM SDK. No shell profile is
+omits Homebrew, ~/.local/bin, ~/.cargo/bin, ~/.bun/bin or the default FVM SDK. No shell profile is
 modified. Python 3 and the applicable language SDK must already exist; MR.DE does not
 silently install a full SDK or substitute a different package manager.
 
 Detected checks stay **Proposed**. **Allow, install and calculate** approves their exact
 command, package directory, parser and preparation recipe, prepares both commit snapshots,
 then calculates the profile. Setup may download packages; the subsequent check uses offline
-package-manager settings. Lockfiles are required for npm, Cargo and Dart dependency setup.
+package-manager settings. Lockfiles are required for Bun, npm, Cargo and Dart dependency setup.
 A failed installation is shown with a retry path and leaves the relevant axis n/a; other
 axes still finish. Cancellation stops the subprocess group. User worktrees are unchanged.
+
+JavaScript detection reads `packageManager` first, then `bun.lock`/`bun.lockb`,
+`package-lock.json`/`npm-shrinkwrap.json`, `pnpm-lock.yaml` or `yarn.lock`. Conflicting
+lockfiles require an explicit `packageManager`; unsupported managers produce a specific
+message instead of falling back to npm. Bun and npm are currently supported for automatic
+setup. Workspace membership determines the install root, while the lint command retains
+its package directory. The install root is included in the approval fingerprint.
+
+Bun runs ESLint directly and installs with `--frozen-lockfile --ignore-scripts`.
+See the [Bun install documentation](https://bun.sh/docs/pm/cli/install) and
+[lockfile formats](https://bun.sh/docs/pm/lockfile). Versions without a real `--offline`
+option (including Bun 1.3.3) require **Detect and install tools** for a new calculation;
+MR.DE reports this rather than using `--prefer-offline`, which can access the network.
+Bun itself must already be installed. No lockfile is converted and no lifecycle script runs.
 
 Tool preparation is a separate action from **Calculate again** and background refresh.
 The CLI exposes the same explicit preparation through `--run-checks --prepare-tools`;

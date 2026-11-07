@@ -51,3 +51,13 @@ Feature: Preserve the native review interface contract
     When I explore its synthetic request and settings
     Then no saved credential is read and no forge request is sent
     And simulated review actions do not start Claude
+
+  @MRDE-UI-007 @regression
+  Scenario: Copy debug logs without losing diagnostic text
+    Given Debug logs contains redacted entries with timestamps and literal code characters
+    When I select log text and copy it with the keyboard
+    Then the clipboard contains the selected text as displayed
+    When I click "Copy logs"
+    Then the clipboard contains all retained entries with their line breaks
+    And "Copied" confirms the action
+    And newly received entries can be copied without reopening the drawer

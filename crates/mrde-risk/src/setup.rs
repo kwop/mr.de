@@ -204,10 +204,36 @@ pub(crate) async fn dependencies(
     env: &Environment,
     network: Network,
 ) -> Result<()> {
+    ensure!(
+        command.approved,
+        "{} is proposed and needs local approval",
+        command.id
+    );
     let Some(recipe) = command.preparation else {
         return Ok(());
     };
-    let root = directory(root, command)?;
+    let mut package = command.clone();
+    if matches!(
+        recipe,
+        Preparation::Npm | Preparation::Bun | Preparation::JavaScript
+    ) {
+        let (owner, actual) = crate::javascript::from_snapshot(root, &command.directory)?;
+        ensure!(
+            actual == recipe,
+            "Package manager differs between the reviewed commits; configure explicit comparable lint commands in risk.toml"
+        );
+        ensure!(
+            command
+                .preparation_directory
+                .as_ref()
+                .is_none_or(|expected| expected == &owner),
+            "Workspace ownership differs between the reviewed commits; configure an explicit lint command in risk.toml"
+        );
+        package.directory = owner;
+    } else if let Some(directory) = &command.preparation_directory {
+        package.directory = directory.clone();
+    }
+    let root = directory(root, &package)?;
     let online = network == Network::Setup;
     let argv = match recipe {
         Preparation::Cargo => {
@@ -222,16 +248,42 @@ pub(crate) async fn dependencies(
             argv
         }
         Preparation::Npm => {
-            ensure!(
-                root.join("package-lock.json").is_file()
-                    || root.join("npm-shrinkwrap.json").is_file(),
-                "No npm lockfile in this package. Configure risk.toml for its package manager; MR.DE will not choose new dependency versions."
-            );
             let mut argv = args(&["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
             if !online {
                 argv.push("--offline".into());
             }
             argv
+        }
+        Preparation::Bun => {
+            let mut argv = args(&["bun", "install", "--frozen-lockfile", "--ignore-scripts"]);
+            if !online {
+                let help = run_in(
+                    &Check {
+                        id: "Check Bun offline support".into(),
+                        command: args(&["bun", "install", "--help"]),
+                        approval: Approval::Approved,
+                    },
+                    &root,
+                    Duration::from_secs(10),
+                    env,
+                    Network::Offline,
+                )
+                .await?;
+                ensure!(
+                    help.code == Some(0)
+                        && help
+                            .stdout
+                            .split_whitespace()
+                            .chain(help.stderr.split_whitespace())
+                            .any(|word| word == "--offline"),
+                    "Installed Bun cannot restore dependencies offline. Use Detect and install tools to calculate with this version, or install a Bun version with --offline support."
+                );
+                argv.push("--offline".into());
+            }
+            argv
+        }
+        Preparation::JavaScript => {
+            anyhow::bail!("JavaScript package manager could not be resolved; configure risk.toml")
         }
         Preparation::Dart | Preparation::Flutter => {
             ensure!(
@@ -412,6 +464,86 @@ esac
         assert_eq!(
             std::fs::read_to_string(root.join("bin/install-count")).unwrap(),
             "installed\ninstalled\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bun_preparation_preserves_lockfiles_skips_scripts_and_never_silently_goes_online() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let bin = root.join("tools");
+        std::fs::create_dir(&bin).unwrap();
+        std::fs::create_dir_all(root.join("packages/web")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"workspaces":["packages/*"],"packageManager":"bun@1.3.3"}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("packages/web/package.json"), "{}").unwrap();
+        std::fs::write(root.join("bun.lock"), "original lockfile").unwrap();
+        let script = |offline: bool| {
+            format!(
+                "#!/bin/sh\nif [ \"$2\" = --help ]; then echo '{}'; exit 0; fi\nprintf '%s\\n' \"$*\" >> bun-invocations\n",
+                if offline {
+                    "--offline"
+                } else {
+                    "--prefer-offline"
+                }
+            )
+        };
+        let bun = bin.join("bun");
+        std::fs::write(&bun, script(false)).unwrap();
+        std::fs::set_permissions(&bun, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let env = Environment {
+            directories: vec![bin],
+        };
+        let mut command = Command {
+            id: "eslint@packages/web".into(),
+            directory: "packages/web".into(),
+            preparation: Some(Preparation::Bun),
+            preparation_directory: Some(String::new()),
+            approved: false,
+            ..Command::default()
+        };
+        assert!(
+            dependencies(&command, root, &env, Network::Setup)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("approval")
+        );
+        assert!(!root.join("bun-invocations").exists());
+        command.approved = true;
+        dependencies(&command, root, &env, Network::Setup)
+            .await
+            .unwrap();
+        let log = root.join("bun-invocations");
+        let first = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(first, "install --frozen-lockfile --ignore-scripts\n");
+        assert!(!root.join("packages/web/bun-invocations").exists());
+        let error = dependencies(&command, root, &env, Network::Offline)
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("cannot restore dependencies offline")
+        );
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), first);
+        std::fs::write(&bun, script(true)).unwrap();
+        dependencies(&command, root, &env, Network::Offline)
+            .await
+            .unwrap();
+        assert!(
+            std::fs::read_to_string(&log)
+                .unwrap()
+                .ends_with("--ignore-scripts --offline\n")
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("bun.lock")).unwrap(),
+            "original lockfile"
         );
     }
 }

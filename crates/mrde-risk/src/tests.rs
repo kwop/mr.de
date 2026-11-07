@@ -583,3 +583,124 @@ async fn go_vet_reports_on_either_stream_contribute_to_the_warning_delta() {
         assert_eq!(raw.evidence[0].path, "main.go");
     }
 }
+
+#[tokio::test]
+async fn detects_bun_lockfiles_and_explicit_manager_without_assuming_npm() {
+    use config::Preparation::*;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "developer@example.com"]);
+    git(root, &["config", "user.name", "Developer"]);
+    let cases = [
+        ("bun-text", None, vec!["bun.lock"], Bun),
+        ("bun-binary", None, vec!["bun.lockb"], Bun),
+        (
+            "declared-bun",
+            Some("bun@1.3.3"),
+            vec!["bun.lock", "package-lock.json"],
+            Bun,
+        ),
+        (
+            "declared-npm",
+            Some("npm@11.0.0"),
+            vec!["bun.lock", "package-lock.json"],
+            Npm,
+        ),
+        (
+            "ambiguous",
+            None,
+            vec!["bun.lock", "package-lock.json"],
+            JavaScript,
+        ),
+        ("pnpm", None, vec!["pnpm-lock.yaml"], JavaScript),
+        ("yarn", Some("yarn@4.0.0"), vec!["yarn.lock"], JavaScript),
+        (
+            "missing-bun",
+            Some("bun@1.3.3"),
+            vec!["package-lock.json"],
+            JavaScript,
+        ),
+        ("npm", None, vec!["npm-shrinkwrap.json"], Npm),
+    ];
+    for (dir, manager, locks, _) in &cases {
+        let mut package = serde_json::json!({"devDependencies":{"eslint":"9.0.0"}});
+        if let Some(manager) = manager {
+            package["packageManager"] = (*manager).into();
+        }
+        write(root, &format!("{dir}/package.json"), &package.to_string());
+        for lock in locks {
+            write(root, &format!("{dir}/{lock}"), "fixture");
+        }
+    }
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "Package manager fixtures"]);
+    let sha = git(root, &["rev-parse", "HEAD"]);
+    for (dir, _, _, expected) in cases {
+        let changed = [format!("{dir}/src/main.ts")];
+        let commands = detect::lint_commands(root, &sha, &changed).await.unwrap();
+        assert_eq!(commands.len(), 1, "{dir}");
+        assert_eq!(commands[0].preparation, Some(expected), "{dir}");
+        assert_eq!(
+            commands[0].command[0],
+            if expected == Bun { "bun" } else { "node" },
+            "{dir}"
+        );
+        assert!(!commands[0].approved);
+        // Dirty manifests and lockfiles must never replace reviewed metadata.
+        write(root, &format!("{dir}/package.json"), "not JSON");
+        assert_eq!(
+            detect::lint_commands(root, &sha, &changed).await.unwrap()[0].key(),
+            commands[0].key()
+        );
+    }
+}
+
+#[tokio::test]
+async fn bun_workspace_setup_uses_root_lockfile_and_keeps_the_changed_package_scope() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "developer@example.com"]);
+    git(root, &["config", "user.name", "Developer"]);
+    write(
+        root,
+        "package.json",
+        r#"{"packageManager":"bun@1.3.3","workspaces":["packages/*","!packages/excluded"]}"#,
+    );
+    write(root, "bun.lock", "fixture");
+    for directory in ["packages/web", "packages/excluded", "unrelated"] {
+        write(
+            root,
+            &format!("{directory}/package.json"),
+            r#"{"devDependencies":{"eslint":"9.0.0"}}"#,
+        );
+    }
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "Workspace fixture"]);
+    let sha = git(root, &["rev-parse", "HEAD"]);
+    let commands = detect::lint_commands(root, &sha, &["packages/web/src/main.ts".into()])
+        .await
+        .unwrap();
+    assert_eq!(commands.len(), 1);
+    let command = &commands[0];
+    assert_eq!(command.preparation, Some(config::Preparation::Bun));
+    assert_eq!(command.directory, "packages/web");
+    assert_eq!(command.preparation_directory.as_deref(), Some(""));
+    let mut changed = command.clone();
+    changed.preparation_directory = Some("packages/web".into());
+    assert_ne!(
+        command.key(),
+        changed.key(),
+        "Install scope belongs in the approval fingerprint"
+    );
+    for directory in ["packages/excluded", "unrelated"] {
+        let commands = detect::lint_commands(root, &sha, &[format!("{directory}/main.ts")])
+            .await
+            .unwrap();
+        assert_eq!(
+            commands[0].preparation,
+            Some(config::Preparation::JavaScript)
+        );
+    }
+}
