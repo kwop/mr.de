@@ -166,6 +166,11 @@ pub(crate) fn eslint_argv(command: &crate::config::Command, root: &Path) -> Vec<
                 break;
             }
         }
+        if command.preparation == Some(Preparation::Bun) && argv.first().is_some_and(|v| v == "bun")
+        {
+            // Cached dependencies must never trigger Bun's runtime auto-installer.
+            argv.insert(1, "--no-install".into());
+        }
     }
     argv
 }

@@ -143,3 +143,22 @@ Feature: Inspect an explainable risk profile
     When I prepare the detected lint command
     Then MR.DE explains the package-manager issue without substituting npm
     And the other risk axes can still finish
+
+  @MRDE-RISK-016 @regression
+  Scenario: Recalculate with Bun after the preparation process has ended
+    Given an approved Bun lint check has prepared both commits
+    And the installed Bun version has no offline install option
+    When I restart MR.DE and calculate risks for the same commits
+    Then MR.DE restores independent copies of the prepared dependencies
+    And no package installation or download is started
+    And workspace links and the measured warning delta are preserved
+    And changes made by a linter do not affect the next calculation
+
+  @MRDE-RISK-017 @regression
+  Scenario: Rebuild dependencies when their cached preparation is no longer valid
+    Given a dependency cache entry is incomplete, damaged or no longer matches the commit, command or Bun version
+    When I calculate risks
+    Then unavailable dependencies leave the lint axis unavailable with a setup action
+    And the other risk axes can still finish
+    When I run "Detect and install tools"
+    Then MR.DE publishes a complete replacement dependency cache

@@ -126,3 +126,9 @@ The skill is manual and uses the existing conversation; it never starts a second
 session. Packaging validation uses `claude plugin validate`, without a model request.
 Integration tests exercise the actual CLI with temporary Git repositories, shared-engine
 parity, proposed commands, missing refs, coverage failures, linked worktrees and JSON/SVG.
+
+Bun setup persists dependency trees under `--tool-cache` (or the MR.DE platform cache).
+After a scan with `--run-checks --prepare-tools`, the same approved command and commits
+can be scanned with `--run-checks` in a new process without running `bun install` again.
+This works with Bun 1.3.3. New commits, command definitions or Bun versions require fresh
+preparation; a missing cache never grants permission to download packages.

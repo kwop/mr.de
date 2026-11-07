@@ -357,7 +357,7 @@ impl RiskConfig {
     pub fn fingerprint(&self) -> String {
         format!(
             // Bumped when scorers change meaning, so cached profiles are measured again.
-            "risk-v4:{:x}",
+            "risk-v5:{:x}",
             Sha256::digest(serde_json::to_vec(self).expect("serializable config"))
         )
     }

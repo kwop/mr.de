@@ -402,3 +402,140 @@ async fn assumed_unchanged_files_are_not_silently_reported_as_clean() {
     request.head = Some("HEAD".into());
     assert!(scan(request).await.is_ok());
 }
+
+#[cfg(unix)]
+#[test]
+fn bun_prepared_once_is_reused_by_separate_cli_processes_without_installing_again() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = Repo::new();
+    repo.write(
+        "package.json",
+        r#"{"packageManager":"bun@1.3.3","devDependencies":{"eslint":"9.0.0"}}"#,
+    );
+    repo.write("bun.lock", "synthetic lock");
+    repo.write("main.js", "export const value = 1;\n");
+    repo.commit();
+    let base = repo.git(&["rev-parse", "HEAD"]);
+    repo.write("main.js", "const unused = 1;\nexport const value = 2;\n");
+    repo.commit();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    fs::write(
+        repo.config.join("risk.toml"),
+        "[complexity]\ncommand = ['/usr/bin/true']\n",
+    )
+    .unwrap();
+    let bin = repo._temp.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let script = r#"#!/bin/sh
+set -eu
+tools=${0%/*}
+case "$1" in
+  --version) printf '1.3.3\n' ;;
+  install)
+    if [ "${2:-}" = --help ]; then printf '%s\n' '--frozen-lockfile --ignore-scripts'; exit 0; fi
+    [ ! -f "$tools/forbid-install" ] || exit 97
+    printf 'install\n' >> "$tools/installs"
+    mkdir -p node_modules/eslint/bin
+    printf 'pristine' > node_modules/eslint/bin/eslint.js
+    ;;
+  *)
+    [ "$(cat node_modules/eslint/bin/eslint.js)" = pristine ] || exit 98
+    printf 'changed by lint' > node_modules/eslint/bin/eslint.js
+    if /usr/bin/grep -q unused main.js; then
+      printf '%s\n' '[{"filePath":"main.js","messages":[{"line":1,"ruleId":"no-unused-vars","message":"Unused value","severity":1}]}]'
+      exit 1
+    fi
+    printf '[]\n'
+    ;;
+esac
+"#;
+    fs::write(bin.join("bun"), script).unwrap();
+    fs::set_permissions(bin.join("bun"), fs::Permissions::from_mode(0o755)).unwrap();
+    let cache = repo._temp.path().join("managed cache");
+    let run = |head: &str, extra: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_mrde-radar"))
+            .args([
+                "--repo",
+                repo.root.to_str().unwrap(),
+                "--base",
+                &base,
+                "--head",
+                head,
+                "--config-dir",
+                repo.config.to_str().unwrap(),
+                "--tool-cache",
+                cache.to_str().unwrap(),
+                "--json",
+            ])
+            .args(extra)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<ScanReport>(&result.stdout).unwrap()
+    };
+    let initial = run(&head, &[]);
+    let key = initial
+        .report
+        .pending_commands
+        .iter()
+        .find(|c| c.id == "eslint")
+        .unwrap()
+        .key
+        .clone();
+    let prepared = run(
+        &head,
+        &["--run-checks", "--prepare-tools", "--allow-command", &key],
+    );
+    let lint = &prepared.report.profile.axes[Axis::Lint.index()];
+    assert_eq!(
+        lint.raw.as_ref().map(|m| m.value),
+        Some(1.),
+        "{:?} {:?}",
+        lint.unavailable,
+        prepared.report.setup_messages
+    );
+    assert_eq!(
+        fs::read_to_string(bin.join("installs")).unwrap(),
+        "install\ninstall\n"
+    );
+    fs::write(bin.join("forbid-install"), "").unwrap();
+    for _ in 0..2 {
+        let report = run(&head, &["--run-checks", "--allow-command", &key]);
+        let lint = &report.report.profile.axes[Axis::Lint.index()];
+        assert_eq!(
+            lint.raw.as_ref().map(|m| m.value),
+            Some(1.),
+            "{:?}",
+            lint.unavailable
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(bin.join("installs")).unwrap(),
+        "install\ninstall\n"
+    );
+    assert!(!repo.root.join("node_modules").exists());
+    assert!(repo.git(&["status", "--porcelain"]).is_empty());
+    // A new commit needs its own prepared dependencies, and never silently downloads.
+    repo.write("main.js", "const unused = 2;\nexport const value = 3;\n");
+    repo.commit();
+    let changed = run(
+        &repo.git(&["rev-parse", "HEAD"]),
+        &["--run-checks", "--allow-command", &key],
+    );
+    assert!(
+        changed.report.profile.axes[Axis::Lint.index()]
+            .unavailable
+            .as_ref()
+            .unwrap()
+            .contains("not cached yet")
+    );
+    assert_eq!(
+        fs::read_to_string(bin.join("installs")).unwrap(),
+        "install\ninstall\n"
+    );
+}

@@ -1,5 +1,6 @@
 //! Local risk analysis; no network clients and no implicit Git fetches.
 pub mod config;
+mod dependency_cache;
 pub mod detect;
 mod javascript;
 mod reports;
@@ -36,12 +37,19 @@ pub struct MrContext {
     snapshots: Option<tempfile::TempDir>,
     snapshot_error: Option<String>,
     pub environment: mrde_checks::environment::Environment,
+    tool_cache: Option<PathBuf>,
     pub setup_messages: Vec<String>,
     pub check_errors: BTreeMap<String, String>,
     detection_error: Option<String>,
     prepared_checks: std::collections::BTreeSet<String>,
 }
 impl MrContext {
+    /// Share managed tools and prepared dependencies across separate calculations.
+    pub fn set_tool_cache(&mut self, cache: &Path) {
+        self.tool_cache = Some(cache.into());
+        self.environment = setup::environment(Some(cache));
+    }
+
     /// Associate an external coverage report with the checkout that produced its paths.
     /// The Git snapshot may live elsewhere; this changes no measured code or files.
     pub fn set_coverage(&mut self, report: Option<String>, source_root: &Path) {
@@ -139,6 +147,7 @@ async fn context_impl(
         snapshots: None,
         snapshot_error: None,
         environment: setup::environment(None),
+        tool_cache: setup::default_cache(),
         setup_messages: vec![],
         check_errors: BTreeMap::new(),
         detection_error: None,
