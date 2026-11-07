@@ -22,6 +22,8 @@ pub struct MrContext {
     pub base_sha: String,
     pub head_sha: String,
     pub stats: DiffStats,
+    /// Changed paths no axis counts: generated, vendored, or matching `exclude`.
+    pub excluded: Vec<String>,
     pub files: Vec<FileDiff>,
     pub contents: BTreeMap<String, (Option<String>, Option<String>)>,
     pub contents_error: Option<String>,
@@ -91,10 +93,18 @@ async fn context_impl(
         .iter()
         .map(|g| Ok(globset::Glob::new(g)?.compile_matcher()))
         .collect::<Result<_>>()?;
+    let skipped = |path: &str| {
+        mrde_insights::lang::is_generated(path) || exclude.iter().any(|g| g.is_match(path))
+    };
     let parsed = mrde_insights::diff::parse(&diff)
         .into_iter()
-        .filter(|f| !f.binary && !exclude.iter().any(|g| g.is_match(f.path())))
+        .filter(|f| !f.binary && !skipped(f.path()))
         .collect::<Vec<_>>();
+    let excluded = files
+        .iter()
+        .filter(|f| skipped(&f.path))
+        .map(|f| f.path.clone())
+        .collect();
     let mut ctx = MrContext {
         worktree: worktree.into(),
         base_sha,
@@ -104,6 +114,7 @@ async fn context_impl(
             source: StatsSource::Git,
             files,
         },
+        excluded,
         files: parsed,
         contents: BTreeMap::new(),
         contents_error: None,
@@ -255,6 +266,7 @@ async fn analyze_impl(ctx: MrContext) -> RiskReport {
         },
         verdict_thresholds: ctx.config.verdict,
         stats: ctx.stats,
+        excluded: ctx.excluded,
         pending_commands,
     }
 }

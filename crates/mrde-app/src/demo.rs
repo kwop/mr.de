@@ -550,45 +550,220 @@ pub fn visual() -> anyhow::Result<mrde_core::insights::VisualReport> {
     mrde_insights::visual::compare(&before, &after, &diff)
 }
 
-/// Synthetic risk evidence; preview mode never invokes local analysis commands.
+/// Risk evidence shaped like the scorers' output, scored with the default curves. Preview
+/// mode never invokes local analysis commands.
 pub fn risk(detail: &MrDetail) -> mrde_core::risk::RiskReport {
     use mrde_core::risk::*;
     let stats = stats(detail);
-    let scores = [
-        Some(5.2),
-        Some(4.2),
-        Some(7.),
-        Some(3.),
-        Some(8.6),
-        Some(4.5),
-        None,
-        Some(3.7),
-    ];
-    let axes = std::array::from_fn(|i| match scores[i] {
-        Some(score) => AxisScore {
-            axis: Axis::ALL[i],
-            score: Some(score),
+    let config = mrde_risk::config::RiskConfig::default();
+    let counted: Vec<_> = stats
+        .files
+        .iter()
+        .filter(|f| !mrde_insights::lang::is_generated(&f.path))
+        .collect();
+    let excluded = stats.files.len() - counted.len();
+    let found = |path: &str, line: Option<u32>, detail: &str, contribution: f64| Evidence {
+        path: path.into(),
+        line,
+        detail: detail.into(),
+        contribution,
+    };
+    // Untested: source files without a test file about the same subject in the MR.
+    let subject = |path: &str| {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        let stem = name.split('.').next().unwrap_or(name);
+        stem.strip_suffix("_test").unwrap_or(stem).to_string()
+    };
+    let source = |path: &str| [".go", ".ts", ".tsx"].iter().any(|e| path.ends_with(e));
+    let tests: Vec<String> = counted
+        .iter()
+        .filter(|f| mrde_insights::lang::is_test(&f.path))
+        .map(|f| subject(&f.path))
+        .collect();
+    let mut gap = Vec::new();
+    for file in counted
+        .iter()
+        .filter(|f| source(&f.path) && !mrde_insights::lang::is_test(&f.path) && f.added > 0)
+    {
+        gap.push(if tests.contains(&subject(&file.path)) {
+            found(
+                &file.path,
+                None,
+                "Tests changed in a test file with the same name",
+                0.,
+            )
+        } else {
+            found(
+                &file.path,
+                Some(1),
+                &format!("{} added lines without a related test change", file.added),
+                file.added as f64,
+            )
+        });
+    }
+    gap.sort_by(|a, b| b.contribution.total_cmp(&a.contribution));
+    let changed: u64 = counted.iter().map(|f| f.changed()).sum();
+    let migrations: u64 = counted
+        .iter()
+        .filter(|f| f.path.contains("/migrations/"))
+        .map(|f| f.changed())
+        .sum();
+    let skipped = format!("; {excluded} generated or excluded files not counted");
+    let measured =
+        |axis: Axis, value: f64, unit: &str, method: &str, estimated, evidence| AxisScore {
+            axis,
+            score: normalize(value, &config.normalization[axis.id()]).ok(),
             unavailable: None,
             raw: Some(RawMetric {
-                value: score * 5.,
-                unit: "demo units".into(),
-                method: "Synthetic preview measurement".into(),
-                estimated: i == 3 || i == 5,
-                evidence: stats
-                    .files
-                    .iter()
-                    .take(3)
-                    .map(|f| Evidence {
-                        path: f.path.clone(),
-                        line: Some(12),
-                        detail: "Synthetic finding in the changed code".into(),
-                        contribution: 1.,
-                    })
-                    .collect(),
+                value,
+                unit: unit.into(),
+                method: method.into(),
+                estimated,
+                evidence,
             }),
-        },
-        None => AxisScore::unavailable(Axis::ALL[i], "No lint commands configured"),
-    });
+        };
+    const B: &str = "backend/internal/";
+    const W: &str = "web/src/features/invoices/";
+    let axes = [
+        measured(
+            Axis::DiffSize,
+            changed as f64,
+            "lines",
+            &format!("git diff --numstat merge-base…head; binary lines excluded{skipped}"),
+            false,
+            counted
+                .iter()
+                .map(|f| {
+                    let detail = format!("+{} −{}", f.added, f.removed);
+                    found(&f.path, None, &detail, f.changed() as f64)
+                })
+                .collect(),
+        ),
+        measured(
+            Axis::Files,
+            counted.len() as f64,
+            "files",
+            &format!("git diff --numstat; renames count once{skipped}"),
+            false,
+            counted
+                .iter()
+                .map(|f| found(&f.path, None, "Changed file", 1.))
+                .collect(),
+        ),
+        measured(
+            Axis::Complexity,
+            23.,
+            "CCN delta",
+            "Sum of Lizard function CCN after − before; negative deltas normalize to zero",
+            false,
+            vec![
+                found(
+                    &format!("{B}usecases/create_schedule.go"),
+                    None,
+                    "Cyclomatic complexity delta (Lizard)",
+                    12.,
+                ),
+                found(
+                    &format!("{B}domain/schedule.go"),
+                    None,
+                    "Cyclomatic complexity delta (Lizard)",
+                    9.,
+                ),
+                found(
+                    &format!("{W}ui/RecurrenceFields.tsx"),
+                    None,
+                    "Cyclomatic complexity delta (Lizard)",
+                    5.,
+                ),
+                found(
+                    &format!("{B}usecases/create_invoice.go"),
+                    None,
+                    "Cyclomatic complexity delta (Lizard)",
+                    -3.,
+                ),
+            ],
+        ),
+        measured(
+            Axis::TestGap,
+            gap.iter().map(|e| e.contribution).sum(),
+            "lines",
+            "Added source lines whose file has no related test change in this MR (a test file with the same name, its own test module, or inline tests). Heuristic, not coverage",
+            true,
+            gap,
+        ),
+        measured(
+            Axis::SensitivePaths,
+            migrations as f64 / changed as f64,
+            "weighted fraction",
+            &format!(
+                "Maximum matching glob weight per file × changed lines / all textual changed lines{skipped}"
+            ),
+            false,
+            counted
+                .iter()
+                .filter(|f| f.path.contains("/migrations/"))
+                .map(|f| {
+                    let detail = format!("**/migrations/**: {} lines × 1", f.changed());
+                    found(&f.path, None, &detail, f.changed() as f64 / changed as f64)
+                })
+                .collect(),
+        ),
+        measured(
+            Axis::Coupling,
+            3.,
+            "edges",
+            "Added manifest dependencies + modules that existing product files import for the first time (standard library and self/super imports ignored); textual heuristic",
+            true,
+            vec![
+                found(
+                    "backend/go.mod",
+                    None,
+                    "Added dependency: github.com/teambition/rrule-go",
+                    1.,
+                ),
+                found(
+                    &format!("{B}usecases/create_invoice.go"),
+                    Some(9),
+                    "New import target: github.com/acme/platform/backend/internal/repositories",
+                    1.,
+                ),
+                found(
+                    &format!("{W}ui/InvoiceForm.tsx"),
+                    Some(4),
+                    "New import target: ./RecurrenceFields",
+                    1.,
+                ),
+            ],
+        ),
+        AxisScore::unavailable(Axis::Lint, "No lint commands configured"),
+        measured(
+            Axis::Debt,
+            2.5,
+            "weighted matches",
+            "Configured regex matches on added product-code lines (test files and inline test modules skipped); syntax and comments are not interpreted",
+            true,
+            vec![
+                found(
+                    &format!("{B}domain/schedule.go"),
+                    Some(88),
+                    "markers: // TODO: handle daylight saving changes when computing the next occurrence",
+                    1.,
+                ),
+                found(
+                    &format!("{B}usecases/create_schedule.go"),
+                    Some(131),
+                    "markers: // FIXME retry when the invoice number sequence is locked",
+                    1.,
+                ),
+                found(
+                    &format!("{W}api/schedules.ts"),
+                    Some(27),
+                    "any: const rule = JSON.parse(raw) as any;",
+                    0.5,
+                ),
+            ],
+        ),
+    ];
     RiskReport {
         profile: RiskProfile {
             axes,
@@ -598,6 +773,12 @@ pub fn risk(detail: &MrDetail) -> mrde_core::risk::RiskReport {
             config_key: "preview".into(),
         },
         verdict_thresholds: VerdictThresholds::default(),
+        excluded: stats
+            .files
+            .iter()
+            .filter(|f| mrde_insights::lang::is_generated(&f.path))
+            .map(|f| f.path.clone())
+            .collect(),
         stats,
         pending_commands: vec![],
     }
@@ -605,16 +786,16 @@ pub fn risk(detail: &MrDetail) -> mrde_core::risk::RiskReport {
 pub fn baseline() -> mrde_core::risk::Baseline {
     mrde_core::risk::Baseline {
         medians: [
-            Some(4.),
+            Some(4.6),
+            Some(3.4),
             Some(3.),
-            Some(5.),
-            Some(4.),
-            Some(5.),
-            Some(3.),
-            Some(2.),
-            Some(2.),
+            Some(4.2),
+            Some(0.8),
+            Some(1.5),
+            None,
+            Some(1.2),
         ],
-        samples: [30, 30, 24, 30, 30, 30, 22, 30],
+        samples: [30, 30, 24, 30, 30, 30, 0, 30],
         requested: 30,
         merged_mrs: 30,
         computed_at: chrono::Utc::now(),
@@ -622,22 +803,52 @@ pub fn baseline() -> mrde_core::risk::Baseline {
     }
 }
 pub fn file_context(path: &str) -> mrde_core::risk::FileContext {
+    let commit = |sha: char, author: &str, date: &str, subject: &str, in_mr: bool| {
+        mrde_core::risk::FileCommit {
+            sha: sha.to_string().repeat(40),
+            author: author.into(),
+            date: date.into(),
+            subject: subject.into(),
+            in_mr,
+        }
+    };
     mrde_core::risk::FileContext {
         path: path.into(),
-        authors: vec![("Alex R.".into(), 65.), ("Sam L.".into(), 35.)],
+        authors: vec![
+            ("Alex R.".into(), 58.),
+            ("Sam L.".into(), 30.),
+            ("Jordan P.".into(), 12.),
+        ],
         commits: vec![
-            mrde_core::risk::FileCommit {
-                sha: "a".repeat(40),
-                date: "2026-10-12".into(),
-                author: "Alex R.".into(),
-                subject: "Validate the scheduling boundary".into(),
-            },
-            mrde_core::risk::FileCommit {
-                sha: "b".repeat(40),
-                date: "2026-09-24".into(),
-                author: "Sam L.".into(),
-                subject: "Add scheduling tests".into(),
-            },
+            commit(
+                'a',
+                "Alex R.",
+                "2026-11-05",
+                "Validate the end date of recurring schedules before saving them",
+                true,
+            ),
+            commit(
+                'b',
+                "Alex R.",
+                "2026-11-03",
+                "Create recurring invoice schedules",
+                true,
+            ),
+            commit(
+                'c',
+                "Sam L.",
+                "2026-10-12",
+                "Fix the invoice dated the day before in UTC+1 (#1187)",
+                false,
+            ),
+            commit(
+                'd',
+                "Jordan P.",
+                "2026-09-24",
+                "Extract invoice numbering into its own use case",
+                false,
+            ),
+            commit('e', "Sam L.", "2026-08-30", "Add invoice drafts", false),
         ],
         warnings: vec![],
     }

@@ -148,6 +148,14 @@ pub async fn file_context(
     result
         .authors
         .sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    let own: std::collections::HashSet<String> = query(
+        worktree,
+        &["rev-list", &format!("{base}..{head}"), "--", path],
+        &[],
+    )
+    .await
+    .map(|text| text.lines().map(str::to_string).collect())
+    .unwrap_or_default();
     match query(
         worktree,
         &[
@@ -169,6 +177,7 @@ pub async fn file_context(
                 let parts: Vec<_> = line.splitn(4, '\u{1f}').collect();
                 if parts.len() == 4 {
                     result.commits.push(FileCommit {
+                        in_mr: own.contains(parts[0]),
                         sha: parts[0].into(),
                         author: parts[1].into(),
                         date: parts[2].into(),

@@ -64,6 +64,7 @@ fn fixture() -> MrContext {
         head_sha: "b".repeat(40),
         files,
         stats,
+        excluded: vec![],
         contents,
         contents_error: None,
         coverage: None,
@@ -91,9 +92,9 @@ async fn test_gap_distinguishes_heuristics_from_lcov_and_cobertura() {
     assert_eq!(heuristic.value, 0.);
     assert!(heuristic.estimated);
     ctx.coverage = Some("SF:/workspace/src/auth.rs\nDA:2,0\nDA:3,1\nend_of_record\n".into());
-    assert_eq!(TestGapScorer.measure(&ctx).await.unwrap().value, 0.5);
+    assert_eq!(TestGapScorer.measure(&ctx).await.unwrap().value, 1.);
     ctx.coverage=Some(r#"<coverage><packages><package><classes><class filename="src/auth.rs"><lines><line number="2" hits="0"/><line number="3" hits="1"/></lines></class></classes></package></packages></coverage>"#.into());
-    assert_eq!(TestGapScorer.measure(&ctx).await.unwrap().value, 0.5);
+    assert_eq!(TestGapScorer.measure(&ctx).await.unwrap().value, 1.);
     ctx.coverage = Some("malformed report".into());
     assert!(TestGapScorer.measure(&ctx).await.is_err());
 }
@@ -133,6 +134,108 @@ async fn coupling_counts_new_targets_and_manifest_dependencies_in_four_ecosystem
             "{path}"
         );
     }
+}
+#[test]
+fn related_tests_match_names_module_directories_and_generic_test_modules() {
+    for (test, source, expected) in [
+        ("tests/auth.rs", "src/auth.rs", true),
+        (
+            "api/create_schedule_test.go",
+            "api/create_schedule.go",
+            true,
+        ),
+        (
+            "web/__tests__/ScheduleDialog.test.tsx",
+            "web/ScheduleDialog.tsx",
+            true,
+        ),
+        (
+            "app/src/test/InvoiceServiceTest.kt",
+            "app/src/main/InvoiceService.kt",
+            true,
+        ),
+        ("src/github/tests.rs", "src/github.rs", true),
+        ("src/settings/projects_tests.rs", "src/settings.rs", true),
+        ("src/ui/tests.rs", "src/ui/mod.rs", true),
+        ("src/tests.rs", "src/scorers.rs", true),
+        ("tests/auth.rs", "src/session.rs", false),
+        ("src/github/tests.rs", "src/gitlab.rs", false),
+        ("src/tests.rs", "src/ui/chrome.rs", false),
+    ] {
+        assert_eq!(covers(test, source), expected, "{test} for {source}");
+    }
+}
+#[test]
+fn dependencies_are_modules_not_imported_names() {
+    assert_eq!(dependency("serde::Deserialize").as_deref(), Some("serde"));
+    assert_eq!(
+        dependency("crate::store::Store").as_deref(),
+        Some("crate::store")
+    );
+    assert_eq!(dependency("react").as_deref(), Some("react"));
+    for relative in ["std::sync", "core::fmt", "super", "self::parse"] {
+        assert_eq!(dependency(relative), None, "{relative}");
+    }
+}
+#[tokio::test]
+async fn test_gap_debt_and_coupling_ignore_test_code_and_new_modules_imports() {
+    let mut ctx = fixture();
+    let diff = "diff --git a/src/store.rs b/src/store.rs\n--- a/src/store.rs\n+++ b/src/store.rs\n@@ -1,0 +2,2 @@\n+use crate::cache::Cache;\n+use std::sync::Arc;\n@@ -2,0 +5,3 @@\n+fn save() { write().unwrap(); }\n+#[cfg(test)]\n+mod tests { use wiremock::Mock; #[test] fn saves() { save().unwrap(); } }\ndiff --git a/src/report.rs b/src/report.rs\nnew file mode 100644\n--- /dev/null\n+++ b/src/report.rs\n@@ -0,0 +1,2 @@\n+use serde::Serialize;\n+fn render() { parse().unwrap(); }\n";
+    ctx.files = mrde_insights::diff::parse(diff);
+    ctx.contents = BTreeMap::from([
+        (
+            "src/store.rs".to_string(),
+            (
+                Some("use crate::model;\nfn load() {}\n".to_string()),
+                Some("use crate::model;\nuse crate::cache::Cache;\nuse std::sync::Arc;\nfn load() {}\nfn save() { write().unwrap(); }\n#[cfg(test)]\nmod tests { use wiremock::Mock; #[test] fn saves() { save().unwrap(); } }\n".to_string()),
+            ),
+        ),
+        (
+            "src/report.rs".to_string(),
+            (
+                None,
+                Some("use serde::Serialize;\nfn render() { parse().unwrap(); }\n".to_string()),
+            ),
+        ),
+    ]);
+    let gap = TestGapScorer.measure(&ctx).await.unwrap();
+    assert_eq!(gap.value, 2., "only the new file's two lines lack tests");
+    assert_eq!(gap.evidence[0].path, "src/report.rs");
+    assert_eq!(gap.evidence[1].detail, "Tests changed in the same file");
+    let debt = DebtScorer.measure(&ctx).await.unwrap();
+    let lines: Vec<_> = debt
+        .evidence
+        .iter()
+        .map(|e| (e.path.as_str(), e.line))
+        .collect();
+    assert_eq!(
+        lines,
+        [("src/store.rs", Some(5)), ("src/report.rs", Some(2))]
+    );
+    let coupling = CouplingScorer.measure(&ctx).await.unwrap();
+    assert_eq!(coupling.value, 1.);
+    assert_eq!(
+        coupling.evidence[0].detail,
+        "New import target: crate::cache"
+    );
+}
+#[tokio::test]
+async fn generated_and_excluded_files_count_toward_no_axis() {
+    let mut ctx = fixture();
+    ctx.stats.files.push(mrde_core::models::FileStat {
+        path: "Cargo.lock".into(),
+        added: 900,
+        removed: 300,
+        binary: false,
+    });
+    ctx.excluded = vec!["Cargo.lock".into()];
+    let size = DiffScorer.measure(&ctx).await.unwrap();
+    assert_eq!(size.value, 5.);
+    assert!(
+        size.method
+            .contains("1 generated or excluded file not counted")
+    );
+    assert_eq!(FileScorer.measure(&ctx).await.unwrap().value, 2.);
 }
 fn xml(ccn: u32) -> String {
     format!(
@@ -275,6 +378,11 @@ async fn two_commit_repository_measures_all_axes_without_modifying_dirty_worktre
         .await
         .unwrap();
     assert_eq!(history.commits.len(), 2);
+    assert_eq!(
+        history.commits.iter().map(|c| c.in_mr).collect::<Vec<_>>(),
+        [true, false],
+        "the MR commit is marked, the earlier one is history"
+    );
     assert_eq!(history.authors[0].1, 100.);
     let mut incomplete = config.clone();
     incomplete.complexity.command = vec![
