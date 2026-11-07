@@ -44,7 +44,7 @@ These measurements guide review depth; they do not establish correctness or safe
 | Axis | Measurement and limits |
 | --- | --- |
 | Diff size / files | Merge-base-to-head `git diff --numstat`; renames count once. Binary files have no line counts. |
-| Complexity | Net cyclomatic complexity delta from Lizard XML; negative deltas normalize to zero. |
+| Complexity | Net cyclomatic complexity delta from Lizard XML; negative deltas normalize to zero. Missing reports for any changed source file make this axis unavailable. |
 | Test gap | Uncovered changed executable lines from LCOV/Cobertura. Report freshness cannot be proven. Without a report, an explicitly marked test-file/source-file ratio heuristic is used. |
 | Sensitive paths | Changed-line share weighted by the highest matching glob, without counting overlapping rules twice. |
 | Coupling | Added Cargo/npm/Dart/Go dependencies plus new textual import targets; explicitly heuristic, not a compiler-resolved dependency graph. |
@@ -73,6 +73,11 @@ and a two-commit repository with a dirty worktree and a timed-out tool.
 image/reader scrolling. Preview the panel with `MRDE_SCENARIO=focus:changes cargo run
 --locked -p mrde -- --ui-preview`. The scorer crate and native drawing use portable APIs;
 the complete desktop application's existing macOS integrations are not Linux-validated.
+
+Preview variations: `MRDE_SCENARIO_FILE=first` opens file ownership/history;
+`MRDE_SCENARIO_AXIS=lint` shows an unavailable axis; `MRDE_SCENARIO_THEME=light`
+checks the radar component's light palette. `MRDE_SCENARIO_RISK_FILE=<report.json>`
+loads a locally measured report in preview mode only, without credentials.
 
 ```mermaid
 flowchart LR

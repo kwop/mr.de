@@ -495,13 +495,20 @@ impl RiskScorer for ComplexityScorer {
                 totals.push(BTreeMap::new());
                 continue;
             }
-            let output = command(ctx, &ctx.config.complexity, root, selected).await?;
+            let output = command(ctx, &ctx.config.complexity, root, selected.clone()).await?;
             ensure!(
                 output.code == Some(0),
                 "Complexity check failed with exit {:?}",
                 output.code
             );
             let mut values = crate::reports::complexity(&output.stdout, root)?;
+            for path in &selected {
+                ensure!(
+                    values.contains_key(path.trim_start_matches("./")),
+                    "Lizard did not report a changed source file: {path}"
+                );
+            }
+            values.retain(|path, _| selected.iter().any(|p| p.trim_start_matches("./") == path));
             if base {
                 for file in &files {
                     if let (Some(old), Some(new)) = (&file.old_path, &file.new_path)

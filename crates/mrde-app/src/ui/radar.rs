@@ -49,7 +49,7 @@ fn drawing(
                 px(96.)
             };
             let line = cx.theme().border;
-            let blue = cx.theme().link;
+            let blue = cx.theme().blue;
             let gray = cx.theme().muted_foreground;
             for ring in if mini {
                 vec![10.]
@@ -220,7 +220,7 @@ pub(super) fn radar(
                             .rounded_full()
                             .border_2()
                             .border_color(cx.theme().background)
-                            .bg(cx.theme().link),
+                            .bg(cx.theme().blue),
                     )
                     .tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
                     .on_click(cx.listener(move |this, _, _, cx| {

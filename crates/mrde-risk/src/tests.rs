@@ -136,7 +136,7 @@ async fn coupling_counts_new_targets_and_manifest_dependencies_in_four_ecosystem
 }
 fn xml(ccn: u32) -> String {
     format!(
-        r#"<cppncss><measure type="Function"><item name="login(...) at ./src/auth.rs:1"><value>1</value><value>4</value><value>{ccn}</value></item></measure><measure type="File"><item name="./src/auth.rs"><value>1</value><value>4</value><value>{ccn}</value><value>1</value></item></measure></cppncss>"#
+        r#"<cppncss><measure type="Function"><item name="login(...) at ./src/auth.rs:1"><value>1</value><value>4</value><value>{ccn}</value></item></measure><measure type="File"><item name="./src/auth.rs"><value>1</value><value>4</value><value>{ccn}</value><value>1</value></item><item name="./tests/auth.rs"><value>0</value></item></measure></cppncss>"#
     )
 }
 #[test]
@@ -276,6 +276,21 @@ async fn two_commit_repository_measures_all_axes_without_modifying_dirty_worktre
         .unwrap();
     assert_eq!(history.commits.len(), 2);
     assert_eq!(history.authors[0].1, 100.);
+    let mut incomplete = config.clone();
+    incomplete.complexity.command = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        "sed 's@tests/auth.rs@tests/omitted.rs@g' complexity.xml".into(),
+    ];
+    let incomplete = analyze(context(root, &base, &head, incomplete).await.unwrap()).await;
+    assert!(
+        incomplete.profile.axes[Axis::Complexity.index()]
+            .unavailable
+            .as_ref()
+            .unwrap()
+            .contains("did not report")
+    );
+    assert_eq!(incomplete.profile.available(), 7);
     config.timeout_seconds = 1;
     config.complexity.command = vec!["/bin/sh".into(), "-c".into(), "sleep 3".into()];
     let partial = analyze(context(root, &base, &head, config).await.unwrap()).await;

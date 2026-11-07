@@ -60,7 +60,9 @@ pub fn sort_queue(queue: &mut [MergeRequest], sort: QueueSort, now: DateTime<Utc
                         .filter(|n| n.is_finite())
                 };
                 match (risk(a), risk(b)) {
-                    (Some(a), Some(b)) => b.total_cmp(&a),
+                    (Some(left), Some(right)) => right
+                        .total_cmp(&left)
+                        .then_with(|| score(b, now).cmp(&score(a, now))),
                     (Some(_), None) => std::cmp::Ordering::Less,
                     (None, Some(_)) => std::cmp::Ordering::Greater,
                     _ => score(b, now).cmp(&score(a, now)),
@@ -173,5 +175,27 @@ mod tests {
         assert_eq!(order(QueueSort::Newest), [2, 1, 3]);
         assert_eq!(order(QueueSort::Oldest), [3, 1, 2]);
         assert_eq!(order(QueueSort::Smallest), [3, 1, 2]);
+        let mut queue = base.clone();
+        for (mr, value) in queue.iter_mut().zip([2., 9., 7.]) {
+            mr.risk = Some(crate::risk::RiskSummary {
+                scores: [Some(value); 8],
+                mean: Some(value),
+                head_sha: mr.sha.clone(),
+                computed_at: now,
+            });
+        }
+        queue[1].risk.as_mut().unwrap().head_sha = "stale".into();
+        sort_queue(&mut queue, QueueSort::Risk, now);
+        assert_eq!(
+            queue.iter().map(|mr| mr.id.iid).collect::<Vec<_>>(),
+            [3, 1, 2]
+        );
+        queue[2].risk.as_mut().unwrap().head_sha = queue[2].sha.clone();
+        queue[2].risk.as_mut().unwrap().mean = Some(f64::NAN);
+        sort_queue(&mut queue, QueueSort::Risk, now);
+        assert_eq!(
+            queue.iter().map(|mr| mr.id.iid).collect::<Vec<_>>(),
+            [3, 1, 2]
+        );
     }
 }
