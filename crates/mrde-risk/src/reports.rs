@@ -212,6 +212,89 @@ pub fn diagnostics(command: &Command, text: &str, root: &Path) -> Result<Vec<Dia
                 }
             }
         }
+        "ruff" => {
+            let values: Vec<serde_json::Value> = serde_json::from_str(text)?;
+            for value in values {
+                out.push(Diagnostic {
+                    path: value["filename"]
+                        .as_str()
+                        .context("Ruff filename missing")?
+                        .into(),
+                    line: value["location"]["row"].as_u64().unwrap_or(0) as u32,
+                    rule: value["code"].as_str().unwrap_or("syntax").into(),
+                    message: value["message"]
+                        .as_str()
+                        .context("Ruff message missing")?
+                        .into(),
+                });
+            }
+        }
+        "dart" => {
+            for line in text.lines().filter(|l| !l.trim().is_empty()) {
+                let fields: Vec<_> = line.splitn(8, '|').collect();
+                ensure!(
+                    fields.len() == 8 && matches!(fields[0], "ERROR" | "WARNING" | "INFO"),
+                    "Expected Dart machine diagnostics"
+                );
+                out.push(Diagnostic {
+                    path: fields[3].into(),
+                    line: fields[4].parse()?,
+                    rule: fields[2].into(),
+                    message: fields[7].into(),
+                });
+            }
+        }
+        "go_vet" => {
+            // go vet emits package headers and consecutive JSON objects on stderr.
+            let json = text
+                .lines()
+                .filter(|line| !line.starts_with("# "))
+                .collect::<Vec<_>>()
+                .join("\n");
+            for value in serde_json::Deserializer::from_str(&json).into_iter::<serde_json::Value>()
+            {
+                let value = value?;
+                if value.is_null() {
+                    continue;
+                }
+                for package in value
+                    .as_object()
+                    .context("Expected go vet JSON packages")?
+                    .values()
+                {
+                    for (rule, diagnostics) in
+                        package.as_object().context("Expected go vet analyzers")?
+                    {
+                        if diagnostics.is_null() {
+                            continue;
+                        }
+                        for item in diagnostics
+                            .as_array()
+                            .context("Expected go vet diagnostics")?
+                        {
+                            let position = item["posn"]
+                                .as_str()
+                                .context("Go diagnostic position missing")?;
+                            let (file_line, _) = position
+                                .rsplit_once(':')
+                                .context("Go diagnostic column missing")?;
+                            let (file, line) = file_line
+                                .rsplit_once(':')
+                                .context("Go diagnostic line missing")?;
+                            out.push(Diagnostic {
+                                path: file.into(),
+                                line: line.parse()?,
+                                rule: rule.into(),
+                                message: item["message"]
+                                    .as_str()
+                                    .context("Go diagnostic message missing")?
+                                    .into(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
         "regex" => {
             let pattern = regex::Regex::new(&command.warning_regex)?;
             for capture in pattern.captures_iter(text) {

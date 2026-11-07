@@ -72,6 +72,11 @@ fn fixture() -> MrContext {
         config,
         snapshots: None,
         snapshot_error: None,
+        environment: mrde_checks::environment::Environment::default(),
+        setup_messages: vec![],
+        check_errors: Default::default(),
+        detection_error: None,
+        prepared_checks: Default::default(),
     }
 }
 #[tokio::test]
@@ -409,4 +414,172 @@ async fn two_commit_repository_measures_all_axes_without_modifying_dirty_worktre
             .is_none()
     );
     assert_eq!(partial.profile.available(), 7);
+}
+
+#[tokio::test]
+async fn detects_only_changed_packages_and_never_executes_manifest_scripts() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "developer@example.com"]);
+    git(root, &["config", "user.name", "Developer"]);
+    write(
+        root,
+        "mobile/pubspec.yaml",
+        "name: fixture\ndependencies:\n  flutter:\n    sdk: flutter\n",
+    );
+    write(
+        root,
+        "web/package.json",
+        r#"{"devDependencies":{"eslint":"9.0.0"},"scripts":{"lint":"touch sentinel"}}"#,
+    );
+    write(root, "server/go.mod", "module example.invalid/server\n");
+    write(
+        root,
+        "unrelated/Cargo.toml",
+        "[package]\nname='unrelated'\nversion='0.1.0'\n",
+    );
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "Manifests"]);
+    let sha = git(root, &["rev-parse", "HEAD"]);
+    let changed = [
+        "mobile/lib/screen.dart",
+        "web/src/index.ts",
+        "server/main.go",
+    ]
+    .map(str::to_string);
+    let commands = detect::lint_commands(root, &sha, &changed).await.unwrap();
+    assert_eq!(commands.len(), 3);
+    assert!(commands.iter().all(|c| !c.approved));
+    assert_eq!(
+        commands
+            .iter()
+            .map(|c| c.directory.as_str())
+            .collect::<Vec<_>>(),
+        ["mobile", "server", "web"]
+    );
+    assert_eq!(commands[0].preparation, Some(config::Preparation::Flutter));
+    assert_eq!(commands[2].command[0], "node");
+    assert!(!root.join("sentinel").exists());
+    // Detection reads the reviewed commit, not edits to the live worktree.
+    write(root, "web/package.json", "not JSON");
+    assert_eq!(
+        detect::lint_commands(root, &sha, &changed).await.unwrap()[2].key(),
+        commands[2].key()
+    );
+    assert!(
+        detect::lint_commands(root, &sha, &["README.md".into()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn parses_detected_dart_go_and_python_diagnostics() {
+    let root = Path::new("/snapshot");
+    let mut command = Command {
+        format: "dart".into(),
+        ..Command::default()
+    };
+    let diagnostics = reports::diagnostics(&command, "WARNING|STATIC_WARNING|unused_local_variable|/snapshot/lib/main.dart|3|4|2|Unused variable\n", root).unwrap();
+    assert_eq!(diagnostics[0].path, "lib/main.dart");
+    assert_eq!(diagnostics[0].line, 3);
+    assert!(reports::diagnostics(&command, "Analyzer failed", root).is_err());
+    command.format = "go_vet".into();
+    let diagnostics = reports::diagnostics(&command, "# example.invalid/app\n{\"example.invalid/app\":{\"printf\":[{\"posn\":\"/snapshot/main.go:8:2\",\"message\":\"format mismatch\"}]}}\n{}", root).unwrap();
+    assert_eq!(diagnostics[0].path, "main.go");
+    assert_eq!(diagnostics[0].rule, "printf");
+    command.format = "ruff".into();
+    let diagnostics = reports::diagnostics(&command, r#"[{"filename":"/snapshot/main.py","location":{"row":2},"code":"F401","message":"Unused import"}]"#, root).unwrap();
+    assert_eq!(diagnostics[0].path, "main.py");
+    assert_eq!(diagnostics[0].line, 2);
+}
+
+#[tokio::test]
+async fn missing_complexity_tool_leaves_other_axes_available_with_setup_guidance() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "developer@example.com"]);
+    git(root, &["config", "user.name", "Developer"]);
+    write(root, "main.py", "def value():\n    return 1\n");
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "Before"]);
+    let base = git(root, &["rev-parse", "HEAD"]);
+    write(
+        root,
+        "main.py",
+        "def value(x):\n    if x:\n        return 1\n    return 2\n",
+    );
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "After"]);
+    let head = git(root, &["rev-parse", "HEAD"]);
+    let mut config = RiskConfig::default();
+    config.complexity.command[0] = "mrde-missing-complexity-fixture".into();
+    let ctx = context(root, &base, &head, config).await.unwrap();
+    assert_eq!(ctx.config.lint_commands().len(), 1);
+    assert!(!ctx.config.lint_commands()[0].approved);
+    let report = analyze(ctx).await;
+    let complexity = &report.profile.axes[Axis::Complexity.index()];
+    assert!(
+        complexity
+            .unavailable
+            .as_ref()
+            .unwrap()
+            .contains("Detect and install tools")
+    );
+    assert_eq!(report.pending_commands.len(), 1);
+    assert_eq!(report.pending_commands[0].id, "ruff");
+    assert!(report.profile.axes[Axis::DiffSize.index()].score.is_some());
+    assert!(
+        report.profile.axes[Axis::Lint.index()]
+            .unavailable
+            .as_ref()
+            .unwrap()
+            .contains("approval")
+    );
+}
+
+#[tokio::test]
+async fn go_vet_reports_on_either_stream_contribute_to_the_warning_delta() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "developer@example.com"]);
+    git(root, &["config", "user.name", "Developer"]);
+    write(root, "main.go", "package main\nfunc main() {}\n");
+    write(root, "vet.json", "{}");
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "Before"]);
+    let base = git(root, &["rev-parse", "HEAD"]);
+    write(
+        root,
+        "main.go",
+        "package main\nfunc main() {}\n// TODO review\n",
+    );
+    write(
+        root,
+        "vet.json",
+        r#"{"fixture":{"printf":[{"posn":"main.go:2:1","message":"format mismatch"}]}}"#,
+    );
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "After"]);
+    let head = git(root, &["rev-parse", "HEAD"]);
+    for script in ["cat vet.json", "cat vet.json >&2"] {
+        let config = RiskConfig {
+            lint: vec![Command {
+                id: "vet-fixture".into(),
+                command: vec!["/bin/sh".into(), "-c".into(), script.into()],
+                format: "go_vet".into(),
+                approved: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let ctx = context(root, &base, &head, config).await.unwrap();
+        let raw = LintScorer.measure(&ctx).await.unwrap();
+        assert_eq!(raw.value, 1.);
+        assert_eq!(raw.evidence[0].path, "main.go");
+    }
 }

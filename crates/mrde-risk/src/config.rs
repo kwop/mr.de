@@ -16,6 +16,11 @@ pub struct RiskConfig {
     pub coverage_path: String,
     pub complexity: Command,
     pub lint: Vec<Command>,
+    pub autodetect_lint: bool,
+    #[serde(skip)]
+    pub detected_lint: Vec<Command>,
+    #[serde(skip)]
+    pub approvals: HashSet<String>,
     pub baseline_count: usize,
     pub timeout_seconds: u64,
     pub verdict: VerdictThresholds,
@@ -37,6 +42,10 @@ pub struct DebtRule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Command {
+    /// Repository-relative package directory; empty means the repository root.
+    pub directory: String,
+    /// Fixed dependency preparation recipe, covered by the command approval.
+    pub preparation: Option<Preparation>,
     pub id: String,
     pub command: Vec<String>,
     /// `json` (standard diagnostics), `eslint`, `clippy`, or `regex`.
@@ -45,9 +54,22 @@ pub struct Command {
     #[serde(skip)]
     pub approved: bool,
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Preparation {
+    Cargo,
+    Npm,
+    Dart,
+    Flutter,
+    Go,
+    Ruff,
+}
+
 impl Default for Command {
     fn default() -> Self {
         Self {
+            directory: String::new(),
+            preparation: None,
             id: "complexity".into(),
             command: vec!["lizard".into(), "--xml".into()],
             format: "lizard".into(),
@@ -141,6 +163,9 @@ impl Default for RiskConfig {
                 ..Default::default()
             },
             lint: vec![],
+            autodetect_lint: true,
+            detected_lint: vec![],
+            approvals: HashSet::new(),
             baseline_count: 30,
             timeout_seconds: 60,
             verdict: VerdictThresholds::default(),
@@ -210,8 +235,24 @@ impl RiskConfig {
             command.approved =
                 trusted.contains(&command.key()) || approvals.contains(&command.key());
         }
+        config.approvals = approvals.clone();
         config.validate()?;
         Ok(config)
+    }
+    pub fn lint_commands(&self) -> &[Command] {
+        if self.lint.is_empty() {
+            &self.detected_lint
+        } else {
+            &self.lint
+        }
+    }
+    pub fn commands_mut(&mut self) -> impl Iterator<Item = &mut Command> {
+        let lint = if self.lint.is_empty() {
+            &mut self.detected_lint
+        } else {
+            &mut self.lint
+        };
+        std::iter::once(&mut self.complexity).chain(lint)
     }
     pub fn validate(&self) -> Result<()> {
         ensure!(
@@ -227,11 +268,11 @@ impl RiskConfig {
             matches!(self.complexity.format.as_str(), "lizard"),
             "Complexity format must be lizard"
         );
-        for command in &self.lint {
+        for command in self.lint_commands() {
             ensure!(
                 matches!(
                     command.format.as_str(),
-                    "json" | "eslint" | "clippy" | "regex"
+                    "json" | "eslint" | "clippy" | "regex" | "dart" | "go_vet" | "ruff"
                 ),
                 "Unsupported lint format"
             );
@@ -273,7 +314,15 @@ impl RiskConfig {
             regex::Regex::new(&r.regex)?;
         }
         let mut ids = HashSet::new();
-        for c in std::iter::once(&self.complexity).chain(&self.lint) {
+        for c in std::iter::once(&self.complexity).chain(self.lint_commands()) {
+            let directory = Path::new(&c.directory);
+            ensure!(
+                !directory.is_absolute()
+                    && directory
+                        .components()
+                        .all(|p| !matches!(p, std::path::Component::ParentDir)),
+                "Check directory must stay inside the repository"
+            );
             ensure!(
                 !c.id.is_empty() && ids.insert(&c.id),
                 "Check IDs must be nonempty and unique"
@@ -299,7 +348,7 @@ impl RiskConfig {
     pub fn fingerprint(&self) -> String {
         format!(
             // Bumped when scorers change meaning, so cached profiles are measured again.
-            "risk-v2:{:x}",
+            "risk-v3:{:x}",
             Sha256::digest(serde_json::to_vec(self).expect("serializable config"))
         )
     }

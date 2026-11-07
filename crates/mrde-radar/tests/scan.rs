@@ -74,6 +74,8 @@ impl Repo {
             config_dir: self.config.clone(),
             project: "local".into(),
             run_checks: false,
+            prepare_tools: false,
+            tool_cache: Some(self.config.join("tools")),
             approved_commands: HashSet::new(),
         }
     }
@@ -178,9 +180,13 @@ async fn committed_scan_matches_the_shared_engine_and_ignores_current_edits() {
     request.base = base.clone();
     request.head = Some("HEAD".into());
     let report = scan(request).await.unwrap();
-    let context = mrde_risk::context(&repo.root, &base, &head, Default::default())
+    let mut context = mrde_risk::context(&repo.root, &base, &head, Default::default())
         .await
         .unwrap();
+    // Match the CLI's default external-check opt-out, even if the host has Lizard.
+    for command in context.config.commands_mut() {
+        command.approved = false;
+    }
     let direct = mrde_risk::analyze(context).await;
     for axis in Axis::ALL {
         assert_eq!(
