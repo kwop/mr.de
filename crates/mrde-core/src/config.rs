@@ -30,18 +30,22 @@ pub enum QueueSort {
     Newest,
     Oldest,
     Smallest,
+    /// Fewest approvals first; unavailable counts follow all known counts.
+    Approvals,
     Risk,
 }
 impl QueueSort {
-    pub const ALL: [QueueSort; 5] = [
+    pub const ALL: [QueueSort; 6] = [
         QueueSort::Priority,
         QueueSort::Newest,
         QueueSort::Oldest,
         QueueSort::Smallest,
+        QueueSort::Approvals,
         QueueSort::Risk,
     ];
     pub fn label(self) -> &'static str {
         match self {
+            QueueSort::Approvals => "Fewest approvals first",
             QueueSort::Risk => "Highest risk first",
             QueueSort::Priority => "Priority",
             QueueSort::Newest => "Newest first",

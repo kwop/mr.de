@@ -105,10 +105,10 @@ group = "example-org"
 
 ## Queue, labels, and priority
 
-The queue lists open, non-draft merge requests where you hold one of the selected roles,
+The queue lists open merge requests, including drafts, where you hold one of the selected roles,
 deduplicated across roles and projects. Each row shows the project, author, title, labels,
-pipeline, age, diff size, and approval count. The queue shows 25 merge requests per page;
-sorting applies to the whole queue before pagination.
+pipeline, age, diff size, and approval count. Drafts have an explicit **Draft** badge. The
+queue shows 25 merge requests per page; sorting applies to the whole queue before pagination.
 
 Sorting options:
 
@@ -116,6 +116,9 @@ Sorting options:
   `P::0` are recognized), then pipeline readiness, age capped at 30 days, then smaller diffs.
   Other labels have no effect on ranking.
 - **Newest**, **Oldest**, or **Smallest diff** (unknown sizes last).
+- **Approvals**: fewest first, with unknown counts last and priority breaking ties. The
+  queue reorders after an approval. Set `mr_sort = "approvals"` in the project TOML.
+- **Risk**: highest measured risk first, with unknown or outdated scores last.
 
 A merge request shows its own labels followed by those of the ticket it implements, because
 many teams label tickets rather than merge requests. The ticket is the related issue
@@ -132,7 +135,7 @@ and related-issue endpoints return names only, so mr.de colors them from the pro
 
 ## GitHub pull requests
 
-A GitHub project lists open, non-draft pull requests with the same roles: **Reviewer** covers
+A GitHub project lists open pull requests, including drafts, with the same roles: **Reviewer** covers
 pending review requests (yours or your team's) and pull requests you have already reviewed,
 **Assignee** and **Author** are what they say. One GraphQL search per role returns each pull
 request with its labels and colors, latest reviews, check status, and size, so a refresh costs

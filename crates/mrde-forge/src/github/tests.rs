@@ -51,7 +51,7 @@ fn urls_map_to_github_com_or_an_enterprise_api() {
 }
 
 #[tokio::test]
-async fn queue_searches_each_role_once_per_pull_and_skips_drafts() {
+async fn queue_searches_each_role_once_per_pull_and_preserves_drafts() {
     let server = MockServer::start().await;
     signed_in(&server).await;
     Mock::given(method("POST"))
@@ -78,8 +78,24 @@ async fn queue_searches_each_role_once_per_pull_and_skips_drafts() {
     let forge = GitHub::new(&server.uri(), "token").unwrap();
     let queue = forge.queue(&[MrRole::Reviewer]).await.unwrap();
     let ids: Vec<u64> = queue.iter().map(|mr| mr.id.iid).collect();
-    assert_eq!(ids.len(), 2);
-    assert!(ids.contains(&7) && ids.contains(&9), "{ids:?}");
+    assert_eq!(ids.len(), 3);
+    assert!(
+        ids.contains(&7) && ids.contains(&8) && ids.contains(&9),
+        "{ids:?}"
+    );
+    assert!(queue.iter().find(|mr| mr.id.iid == 8).unwrap().draft);
+    assert!(!queue.iter().find(|mr| mr.id.iid == 7).unwrap().draft);
+    for request in server.received_requests().await.unwrap() {
+        if request.url.path() == "/api/graphql" {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            assert!(
+                !body["variables"]["q"]
+                    .as_str()
+                    .unwrap()
+                    .contains("draft:false")
+            );
+        }
+    }
     let mr = queue.iter().find(|mr| mr.id.iid == 7).unwrap();
     assert_eq!(mr.id.project, 42);
     assert_eq!(mr.project, "acme/platform");

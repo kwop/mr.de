@@ -797,6 +797,7 @@ mod tests {
 
     fn mr(iid: u64, sha: &str) -> MergeRequest {
         MergeRequest {
+            draft: false,
             risk: None,
             id: MrId { project: 1, iid },
             title: format!("MR {iid}"),

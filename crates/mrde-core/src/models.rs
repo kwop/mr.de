@@ -66,6 +66,9 @@ impl Label {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeRequest {
+    /// Provider draft state; older cached requests default to ready.
+    #[serde(default)]
+    pub draft: bool,
     #[serde(default)]
     pub risk: Option<crate::risk::RiskSummary>,
     pub id: MrId,
@@ -352,6 +355,7 @@ mod tests {
 
     fn mr(title: &str, description: &str) -> MergeRequest {
         MergeRequest {
+            draft: false,
             risk: None,
             id: MrId {
                 project: 8,

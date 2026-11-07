@@ -34,3 +34,10 @@ Feature: Approve exactly the reviewed commit
     When the approval completes
     Then I see an explicit success result
     And the request is not merged by MR.DE
+
+  @MRDE-APPROVE-005 @visual
+  Scenario: Identify the approval action consistently
+    Given a request is open in the reader
+    When I inspect its actions and open the approval confirmation
+    Then Approve and Confirm approval use green buttons with readable labels
+    And disabled approval controls remain visibly disabled

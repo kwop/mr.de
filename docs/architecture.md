@@ -5,6 +5,7 @@ binary); the other crates hold domain logic and adapters, independent of the UI.
 
 | Crate | Role |
 |---|---|
+| `crates/mrde-radar` | Public headless scan service and text/JSON/SVG CLI, sharing `mrde-risk`; see [CLI architecture](radar-cli.md). |
 | `crates/mrde-app` | GPUI views, theme, settings, application composition, UI preview and screenshot harness. |
 | `crates/mrde-core` | Serializable domain models, queue scoring, review orchestration ports, analysis result models. |
 | `crates/mrde-forge` | `Forge` trait and the GitLab REST API v4 adapter. |
@@ -101,7 +102,7 @@ sequenceDiagram
     UI->>DB: Load configuration, cached queue, credentials
     UI->>GL: List open MRs for each configured role
     UI->>GL: Per MR: details, approvals, related issues (concurrently)
-    UI->>UI: Deduplicate, exclude drafts, color labels, sort
+    UI->>UI: Deduplicate, mark drafts, color labels, sort
     User->>UI: Select MR
     UI->>GL: MR, diffs, project, related issues
     UI->>DB: Restore cached review, analysis, tour, screenshots for this commit
@@ -117,8 +118,7 @@ sequenceDiagram
 
 ## GitLab adapter
 
-- Queue: `GET /merge_requests` per role with `with_labels_details=true`, paginated, drafts
-  excluded. The first refresh also reads `GET /user` for the title bar.
+- Queue: `GET /merge_requests` per role with `with_labels_details=true`, paginated, preserving draft status. The first refresh also reads `GET /user` for the title bar.
 - Opening a link: the path is checked against the configured instance first, then
   `GET /projects/:path` gives the project id for the usual merge request requests.
 - Enrichment, four merge requests at a time: the merge request, its approvals, and its
@@ -139,7 +139,7 @@ ID (`/repositories/{id}`), so `MrId.project` stays numeric and renamed repositor
 working.
 
 - Queue: a GraphQL `search` per role filter (`review-requested`, `reviewed-by`, `assignee`,
-  `author`, plus the scope qualifier, `draft:false`), returning labels with colors,
+  `author`, plus the scope qualifier), including draft status, returning labels with colors,
   `latestOpinionatedReviews`, `statusCheckRollup`, sizes, and head and base commits. Results
   are kept for 60 seconds so the enrichment that follows each refresh costs no request;
   queue entries that already carry a size never download diffs.

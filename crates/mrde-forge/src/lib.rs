@@ -39,7 +39,7 @@ pub trait Forge: Send + Sync {
     async fn project_id(&self, _path: &str) -> anyhow::Result<u64> {
         anyhow::bail!("This forge cannot look up projects by path")
     }
-    /// Open, non-draft merge requests where the current user holds any of `roles`.
+    /// Open merge requests, including drafts, where the current user holds any of `roles`.
     async fn queue(&self, roles: &[MrRole]) -> anyhow::Result<Vec<MergeRequest>>;
     /// Current MR metadata and approvals, without diffs, issues, or project lookups.
     async fn summary(&self, id: &MrId) -> anyhow::Result<MergeRequest>;

@@ -68,6 +68,7 @@ impl RawMr {
             .unwrap_or(&self.web_url)
             .to_string();
         MergeRequest {
+            draft: self.draft || self.work_in_progress,
             risk: None,
             id: MrId {
                 project: self.project_id,
@@ -540,9 +541,6 @@ impl Forge for GitLab {
                 (role, user.id.to_string()),
             ];
             for raw in self.pages::<RawMr>(&endpoint, &filters).await? {
-                if raw.draft || raw.work_in_progress {
-                    continue;
-                }
                 let mr = raw.into_model();
                 if seen.insert(mr.id.clone()) {
                     result.push(mr);
@@ -1072,7 +1070,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn queue_unions_roles_deduplicates_skips_drafts_and_follows_pages() {
+    async fn queue_unions_roles_preserves_drafts_and_follows_pages() {
         let server = MockServer::start().await;
         Mock::given(path("/api/v4/user"))
             .respond_with(
@@ -1086,7 +1084,7 @@ mod tests {
                 "iid":iid,"project_id":1,"title":"Review","description":null,
                 "web_url":"https://gitlab.example.com/team/project/-/merge_requests/1",
                 "sha":"abc","created_at":"2026-01-01T00:00:00Z","labels":[],
-                "author":{"id":8,"username":"author"},"draft":draft
+                "author":{"id":8,"username":"author"},"draft":draft,"work_in_progress":iid == 4
             })
         };
         for (role, page, next, body) in [
@@ -1115,8 +1113,15 @@ mod tests {
             .unwrap();
         assert_eq!(
             queue.iter().map(|mr| mr.id.iid).collect::<Vec<_>>(),
-            [1, 3, 4]
+            [1, 2, 3, 4]
         );
+        assert_eq!(
+            queue.iter().map(|mr| mr.draft).collect::<Vec<_>>(),
+            [false, true, false, true]
+        );
+        let cached: Vec<MergeRequest> =
+            serde_json::from_str(&serde_json::to_string(&queue).unwrap()).unwrap();
+        assert!(cached[1].draft && cached[3].draft);
     }
     #[tokio::test]
     async fn queue_requests_only_the_selected_roles() {

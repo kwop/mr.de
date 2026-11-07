@@ -18,9 +18,9 @@ analysis.
 
 ## Features
 
-- **Review queue.** Open, non-draft merge requests where you are reviewer, assignee, or
-  author, across projects. Sorted by priority labels (`P0`, `P::1`, …), pipeline state, age,
-  and size, or by date or diff size. Labels come with their GitLab colors, including those of
+- **Review queue.** Open merge requests where you are reviewer, assignee, or author, across
+  projects, with explicit Draft badges. Sort by priority labels (`P0`, `P::1`, …), pipeline
+  state, age and size, or by date, diff size, approval count or risk. Labels come with their GitLab colors, including those of
   the linked ticket when teams label tickets rather than merge requests. Search the queue
   (**⌘K**), filter it by labels from the sidebar, or open any merge request from its link.
 - **Changes and risk radar.** Eight configurable, explainable risk axes with the review depth
@@ -124,6 +124,19 @@ See [the risk guide](docs/risk.md) for measurement limits, sample counts and cac
 - The local cache (`~/Library/Caches/mrde/`) contains merge request descriptions and AI
   summaries, resolver sessions, and bounded job traces from your instance. Credentials are
   never attached to Claude prompts or stored in this cache.
+
+## Standalone radar and Claude Code plugin
+
+Use the same risk engine from a terminal or a Claude Code session, without launching GPUI:
+
+```sh
+cargo install --locked --path crates/mrde-radar
+mrde-radar --base origin/main --worktree --json
+```
+
+The CLI supports current files or two commits, text/JSON/SVG output, and explicit external
+checks. The [Claude plugin](plugins/mrde/README.md) adds `/mrde:radar` to the current session.
+See the [CLI guide](docs/radar-cli.md) for configuration, installation and limitations.
 
 ## Documentation
 

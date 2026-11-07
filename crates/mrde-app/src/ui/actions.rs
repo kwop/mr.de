@@ -115,6 +115,7 @@ impl Cockpit {
             .child(
                 div().debug_selector(|| "approve".into()).child(
                     Button::new("approve")
+                        .success()
                         .small()
                         .h(px(32.))
                         .icon(gpui_component::IconName::Check)
@@ -170,7 +171,7 @@ impl Cockpit {
                         div().debug_selector(|| "confirm-approval".into()).child(
                             Button::new("confirm")
                                 .small()
-                                .primary()
+                                .success()
                                 .label("Confirm approval")
                                 .disabled(busy)
                                 .on_click(cx.listener(|this, _, _, cx| {

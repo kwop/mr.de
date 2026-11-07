@@ -866,6 +866,66 @@ fn failed_queue_preference_save_retains_current_filters_and_rows(cx: &mut TestAp
     assert!(executor.actions.lock().unwrap().is_empty());
 }
 #[gpui::test]
+fn drafts_and_approval_sort_preserve_unknown_counts_and_reorder_after_approval(
+    cx: &mut TestAppContext,
+) {
+    let service = Arc::new(ControlledSettings::new(false));
+    let executor = Arc::new(FakeExecutor {
+        queue: (1..=26)
+            .map(|iid| {
+                let mut mr = queue_fixture(iid, "2026-11-05T12:00:00Z");
+                mr.draft = iid == 26;
+                mr.approvals = match iid {
+                    2 => None,
+                    26 => Some(0),
+                    _ => Some(1),
+                };
+                mr
+            })
+            .collect(),
+        ..Default::default()
+    });
+    let (view, root, mut visual) =
+        setup_with(cx, service.clone(), executor.clone(), queue_config());
+    let cx = &mut visual;
+    assert!(cx.debug_bounds("draft-1-1").is_none());
+    click("next-page", cx);
+    draw(&root, cx);
+    assert!(cx.debug_bounds("draft-1-26").is_some());
+    click("sort-approvals", cx);
+    finish(&view, &root, cx);
+    cx.update(|_, cx| {
+        let state = view.read(cx);
+        assert_eq!(state.config.mr_sort, QueueSort::Approvals);
+        assert_eq!(state.queue_page, 0);
+        assert_eq!(state.queue.first().unwrap().id.iid, 26);
+        assert_eq!(state.queue.last().unwrap().id.iid, 2);
+    });
+    assert_eq!(
+        service.preferences.lock().unwrap().last().unwrap().1,
+        QueueSort::Approvals
+    );
+    assert!(
+        executor.actions.lock().unwrap().is_empty(),
+        "Sorting must not refetch"
+    );
+    click("mr-1-26", cx);
+    finish(&view, &root, cx);
+    click("approve", cx);
+    draw(&root, cx);
+    click("confirm-approval", cx);
+    finish(&view, &root, cx);
+    cx.update(|_, cx| {
+        let state = view.read(cx);
+        assert_eq!(state.queue[24].id.iid, 26);
+        assert_eq!(state.queue[24].approvals, Some(2));
+        assert_eq!(state.queue[25].id.iid, 2);
+        assert!(state.queue[25].approvals.is_none());
+        assert_eq!(state.detail.as_ref().unwrap().mr.id.iid, 26);
+    });
+}
+
+#[gpui::test]
 fn approval_requires_confirmation_and_sends_the_displayed_sha(cx: &mut TestAppContext) {
     let mr: MergeRequest = serde_json::from_value(serde_json::json!({
         "id":{"project":1,"iid":2}, "title":"Fix queue", "description":"",

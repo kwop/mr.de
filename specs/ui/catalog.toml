@@ -6,7 +6,7 @@ id = "inbox.default"
 title = "Review inbox"
 scenario = "queue"
 contracts = ["MRDE-INBOX-001", "MRDE-UI-001"]
-inspect = ["Sidebar navigation, queue controls and selected-row contrast.", "Labels, pipeline, age and change counts remain readable."]
+inspect = ["Sidebar navigation, queue controls and selected-row contrast.", "Draft badges, labels, pipeline, age and approval counts remain readable."]
 
 [[story]]
 id = "inbox.filtered"
@@ -42,7 +42,7 @@ id = "reader.inbox"
 title = "Queue above the reader"
 scenario = "detail:description"
 contracts = ["MRDE-READ-001", "MRDE-UI-001"]
-inspect = ["Selected request is clear and actions remain attached to the reader."]
+inspect = ["Selected request is clear, Approve is green and actions remain attached to the reader."]
 
 [[story]]
 id = "reader.markdown"
@@ -173,8 +173,8 @@ inspect = ["Zoom controls remain visible; verify wheel, trackpad and scrollbar m
 id = "approval.confirm"
 title = "Approval confirmation"
 scenario = "confirm"
-contracts = ["MRDE-APPROVE-001"]
-inspect = ["Request identity and reviewed commit are visible before confirmation."]
+contracts = ["MRDE-APPROVE-001", "MRDE-APPROVE-005"]
+inspect = ["Request identity and reviewed commit are visible before confirmation.", "Confirm approval is green; the disabled toolbar action is muted."]
 
 [[story]]
 id = "worktrees.default"

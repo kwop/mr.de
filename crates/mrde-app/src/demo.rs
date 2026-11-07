@@ -137,6 +137,7 @@ pub fn queue() -> Vec<MergeRequest> {
     let mut queue: Vec<MergeRequest> = SPECS
         .iter()
         .map(|spec| MergeRequest {
+            draft: spec.iid == 238,
             risk: None,
             id: MrId {
                 project: 42,

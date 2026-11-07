@@ -867,6 +867,13 @@ impl Cockpit {
                     }) {
                         mr.approvals = count;
                     }
+                    if self.config.mr_sort == QueueSort::Approvals {
+                        mrde_core::scoring::sort_queue(
+                            &mut self.queue,
+                            self.config.mr_sort,
+                            chrono::Utc::now(),
+                        );
+                    }
                     self.confirm = false;
                     self.status = format!("Approved on {}.", self.config.provider.label());
                 }
@@ -1132,6 +1139,7 @@ impl Cockpit {
         let mut sorts = segmented();
         for (index, sort) in QueueSort::ALL.into_iter().enumerate() {
             let label = match sort {
+                QueueSort::Approvals => "Approvals",
                 QueueSort::Risk => "Risk",
                 QueueSort::Priority => "Priority",
                 QueueSort::Newest => "Newest",
@@ -1147,6 +1155,7 @@ impl Cockpit {
                             .ghost()
                             .rounded(px(RADIUS_CHIP + 1.))
                             .label(label)
+                            .tooltip(sort.label())
                             .when(self.config.mr_sort == sort, |b| {
                                 b.bg(rgb(SELECTED)).text_color(rgb(HEADING))
                             })
@@ -1610,7 +1619,24 @@ impl Cockpit {
                                         .line_height(px(20.))
                                         .text_color(rgb(HEADING))
                                         .one_line()
-                                        .child(crate::ellipsis::ellipsis(mr.title.clone())),
+                                        .items_center()
+                                        .gap_2()
+                                        .when(mr.draft, |row| {
+                                            row.child(
+                                                widgets::badge("Draft", MUTED).debug_selector({
+                                                    let id = id.clone();
+                                                    move || {
+                                                        format!("draft-{}-{}", id.project, id.iid)
+                                                    }
+                                                }),
+                                            )
+                                        })
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .one_line()
+                                                .child(crate::ellipsis::ellipsis(mr.title.clone())),
+                                        ),
                                 )
                                 .child(labels),
                         )

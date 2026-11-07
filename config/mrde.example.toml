@@ -2,7 +2,8 @@
 gitlab_url = "https://gitlab.example.com"
 refresh_seconds = 120
 claude_path = "claude"
-# Roles: "reviewer", "assignee", "author". Sort: "priority", "newest", "oldest", "smallest".
+# Roles: "reviewer", "assignee", "author".
+# Sort: "priority", "newest", "oldest", "smallest", "approvals" (fewest first), "risk".
 mr_roles = ["reviewer", "assignee"]
 mr_sort = "priority"
 # Optional specification folder for the compliance check; leave empty to disable it.
