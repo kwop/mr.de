@@ -873,7 +873,7 @@ fn popup(area: Rect, width: u16, height: u16) -> Rect {
         height,
     )
 }
-fn confirmation(frame: &mut Frame, app: &App, area: Rect) {
+fn confirmation(frame: &mut Frame, app: &mut App, area: Rect) {
     let area = popup(area, 82, 14);
     frame.render_widget(Clear, area);
     let inner = panel(frame, area, app.t("Confirmation"), READER);
@@ -885,17 +885,28 @@ fn confirmation(frame: &mut Frame, app: &App, area: Rect) {
         Confirmation::Tools(d)=>("Prepare risk tools?",d,app.t("Downloads and dependency installation may access the network and run package setup commands. Repository lint commands still require approval.").to_owned()),
         Confirmation::Lint(d,key)=>("Authorize this lint command?",d,app.risk.as_ref().and_then(|r|r.pending_commands.iter().find(|c|c.key==*key)).map(|c|format!("{}\n{}\n{}",c.directory,c.command.join(" "),c.preparation.as_deref().unwrap_or(""))).unwrap_or_default()),
     };
+    let [heading, commit, body, footer] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Length(2),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+    let title = app.t(title).to_owned();
+    let sha = detail.mr.sha.clone();
+    let mut lines = vec![Line::raw(detail.mr.title.clone()), Line::raw("")];
+    lines.extend(extra.lines().map(|line| Line::raw(line.to_owned())));
+    frame.render_widget(Paragraph::new(title).style(YELLOW), heading);
     frame.render_widget(
-        Paragraph::new(vec![
-            Line::styled(app.t(title).to_owned(), YELLOW),
-            Line::raw(""),
-            Line::raw(detail.mr.title.clone()),
-            Line::raw(extra),
-            Line::raw(""),
-            Line::styled(app.t("y Confirm · n / Esc Cancel").to_owned(), GREEN),
-        ])
-        .wrap(Wrap { trim: false }),
-        inner,
+        Paragraph::new(format!("{}: {sha}", app.t("Commit")))
+            .style(BLUE)
+            .wrap(Wrap { trim: false }),
+        commit,
+    );
+    scroll_text(frame, app, lines, body);
+    frame.render_widget(
+        Paragraph::new(app.t("y Confirm · n / Esc Cancel")).style(GREEN),
+        footer,
     );
 }
 fn help(frame: &mut Frame, app: &App, area: Rect) {

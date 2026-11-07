@@ -591,6 +591,13 @@ impl App {
             if matches!(key.code, KeyCode::Char('n') | KeyCode::Esc) {
                 self.confirmation = None;
             }
+            match key.code {
+                KeyCode::Down | KeyCode::PageDown => self.scroll_by(3),
+                KeyCode::Up | KeyCode::PageUp => self.scroll_by(-3),
+                KeyCode::Home => self.scroll = 0,
+                KeyCode::End => self.scroll = u16::MAX,
+                _ => {}
+            }
             return vec![];
         }
         if self.searching {
@@ -777,10 +784,12 @@ impl App {
                         }
                     }
                     'a' => {
+                        self.scroll = 0;
                         self.confirmation = Some(Confirmation::Approve(detail));
                         None
                     }
                     't' => {
+                        self.scroll = 0;
                         self.confirmation = Some(Confirmation::Tools(detail));
                         None
                     }
@@ -788,6 +797,7 @@ impl App {
                         if let Some(proposal) =
                             self.risk.as_ref().and_then(|r| r.pending_commands.first())
                         {
+                            self.scroll = 0;
                             self.confirmation =
                                 Some(Confirmation::Lint(detail, proposal.key.clone()));
                         }

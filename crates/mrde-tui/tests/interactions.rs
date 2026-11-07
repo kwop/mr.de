@@ -234,3 +234,22 @@ fn worker_runtime_keeps_input_available_while_the_forge_is_pending() {
     assert!(answered);
     assert_eq!(app.screen, Screen::Settings);
 }
+
+#[test]
+fn confirmation_keeps_commit_and_buttons_visible_with_long_scrolled_context() {
+    let mut app = App::demo();
+    app.screen = Screen::Reader;
+    let mut detail = detail(231);
+    detail.mr.title = "A long title ".repeat(100);
+    let sha = detail.mr.sha.clone();
+    app.detail = Some(detail);
+    key(&mut app, KeyCode::Char('a'));
+    let text = rendered(&mut app, 80, 24);
+    assert!(text.contains(&sha));
+    assert!(text.contains("y Confirm"));
+    key(&mut app, KeyCode::End);
+    let text = rendered(&mut app, 80, 24);
+    assert!(text.contains(&sha));
+    assert!(text.contains("y Confirm"));
+    assert!(app.confirmation.is_some());
+}

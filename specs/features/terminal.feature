@@ -34,6 +34,7 @@ Feature: Review merge requests in an interactive terminal
     Then I see the merge request and exact SHA in a confirmation dialog
     And no approval is sent until I confirm
     And confirmation submits that displayed SHA through the shared forge service
+    And the SHA and confirmation keys stay visible while long context scrolls
 
   @MRDE-TUI-005
   Scenario: Ask Claude from the terminal and return
