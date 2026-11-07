@@ -1,6 +1,7 @@
 //! Local risk analysis; no network clients and no implicit Git fetches.
 pub mod config;
 pub mod detect;
+mod javascript;
 mod reports;
 pub mod scorers;
 pub mod setup;
@@ -287,7 +288,17 @@ async fn analyze_impl(ctx: MrContext) -> RiskReport {
             id: c.id.clone(),
             command: c.command.clone(),
             directory: c.directory.clone(),
-            preparation: c.preparation.map(|p| format!("{p:?}")),
+            preparation: c.preparation.map(|p| {
+                let root = c.preparation_directory.as_deref().unwrap_or(&c.directory);
+                format!(
+                    "{p:?} in {}",
+                    if root.is_empty() {
+                        "repository root"
+                    } else {
+                        root
+                    }
+                )
+            }),
         })
         .collect();
     RiskReport {

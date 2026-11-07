@@ -46,6 +46,9 @@ pub struct Command {
     pub directory: String,
     /// Fixed dependency preparation recipe, covered by the command approval.
     pub preparation: Option<Preparation>,
+    /// Repository-relative install root, when it differs from the lint package.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preparation_directory: Option<String>,
     pub id: String,
     pub command: Vec<String>,
     /// `json` (standard diagnostics), `eslint`, `clippy`, or `regex`.
@@ -59,6 +62,9 @@ pub struct Command {
 pub enum Preparation {
     Cargo,
     Npm,
+    Bun,
+    /// JavaScript whose manager is missing, unsupported, or ambiguous.
+    JavaScript,
     Dart,
     Flutter,
     Go,
@@ -70,6 +76,7 @@ impl Default for Command {
         Self {
             directory: String::new(),
             preparation: None,
+            preparation_directory: None,
             id: "complexity".into(),
             command: vec!["lizard".into(), "--xml".into()],
             format: "lizard".into(),
@@ -315,14 +322,16 @@ impl RiskConfig {
         }
         let mut ids = HashSet::new();
         for c in std::iter::once(&self.complexity).chain(self.lint_commands()) {
-            let directory = Path::new(&c.directory);
-            ensure!(
-                !directory.is_absolute()
-                    && directory
-                        .components()
-                        .all(|p| !matches!(p, std::path::Component::ParentDir)),
-                "Check directory must stay inside the repository"
-            );
+            for directory in std::iter::once(&c.directory).chain(c.preparation_directory.iter()) {
+                let directory = Path::new(directory);
+                ensure!(
+                    !directory.is_absolute()
+                        && directory
+                            .components()
+                            .all(|p| !matches!(p, std::path::Component::ParentDir)),
+                    "Check directory must stay inside the repository"
+                );
+            }
             ensure!(
                 !c.id.is_empty() && ids.insert(&c.id),
                 "Check IDs must be nonempty and unique"
@@ -348,7 +357,7 @@ impl RiskConfig {
     pub fn fingerprint(&self) -> String {
         format!(
             // Bumped when scorers change meaning, so cached profiles are measured again.
-            "risk-v3:{:x}",
+            "risk-v4:{:x}",
             Sha256::digest(serde_json::to_vec(self).expect("serializable config"))
         )
     }

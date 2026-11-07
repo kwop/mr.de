@@ -580,7 +580,7 @@ async fn command(
     if let Some(error) = ctx.check_errors.get(&config.key()) {
         anyhow::bail!("{error}");
     }
-    let mut argv = config.command.clone();
+    let mut argv = crate::javascript::eslint_argv(config, root);
     argv.extend(extra);
     mrde_checks::runner::run_in(
         &mrde_checks::Check {
