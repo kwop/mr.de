@@ -62,3 +62,11 @@ Feature: Review merge requests in an interactive terminal
     Then the exported SVG is generated from the actual Ratatui buffer
     And it contains only synthetic data
     And a real-credential snapshot without --demo is rejected
+
+  @MRDE-TUI-008 @security
+  Scenario: Launch the provisioned terminal companion
+    Given the desktop package uses a valid macOS provisioning profile
+    When I launch its terminal companion through Contents/MacOS/mrde-tui
+    Then macOS accepts the helper's own provisioned application bundle
+    And it has the same Keychain access group as the desktop
+    And packaging verifies a demo export without reading saved credentials
