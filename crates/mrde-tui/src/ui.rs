@@ -277,11 +277,34 @@ fn color(value: Option<&str>, fallback: Color) -> Color {
         .map(|v| Color::Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8))
         .unwrap_or(fallback)
 }
+// Choose the higher-contrast black or white fallback when the provider omits text color.
+fn readable_foreground(background: Color) -> Color {
+    let Color::Rgb(r, g, b) = background else {
+        return TEXT;
+    };
+    let luminance: f64 = [(r, 0.2126), (g, 0.7152), (b, 0.0722)]
+        .into_iter()
+        .map(|(channel, weight)| {
+            let c = f64::from(channel) / 255.;
+            weight
+                * if c <= 0.04045 {
+                    c / 12.92
+                } else {
+                    ((c + 0.055) / 1.055).powf(2.4)
+                }
+        })
+        .sum();
+    if (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) {
+        Color::Black
+    } else {
+        Color::White
+    }
+}
 fn labels<'a>(labels: impl Iterator<Item = &'a Label>) -> Vec<Span<'static>> {
     let mut spans = vec![];
     for label in labels {
         let background = color(label.color.as_deref(), SELECTED);
-        let foreground = color(label.text_color.as_deref(), TEXT);
+        let foreground = color(label.text_color.as_deref(), readable_foreground(background));
         if let Some((scope, value)) = label.scope() {
             spans.push(Span::styled(
                 format!(" {scope} "),
@@ -634,9 +657,20 @@ fn radar(frame: &mut Frame, app: &mut App, rect: Rect) {
         return;
     };
     let language = app.config.languages.interface;
+    let verdict = report
+        .profile
+        .verdict(&report.verdict_thresholds)
+        .map(|v| app.t(v.label()))
+        .unwrap_or("n/a");
     if rect.height < 20 || rect.width < 85 {
         let mut lines = vec![Line::styled(
-            format!("{}: {} / 10", app.t("Mean"), score(report.profile.mean())),
+            format!(
+                "◆ {verdict} · {} {} / 10 · {}/{}",
+                app.t("Mean"),
+                score(report.profile.mean()),
+                report.profile.available(),
+                Axis::COUNT
+            ),
             BLUE,
         )];
         for (index, axis) in report.profile.axes.iter().enumerate() {
@@ -669,11 +703,6 @@ fn radar(frame: &mut Frame, app: &mut App, rect: Rect) {
         Constraint::Min(0),
     ])
     .areas(rect);
-    let verdict = report
-        .profile
-        .verdict(&report.verdict_thresholds)
-        .map(|v| app.t(v.label()))
-        .unwrap_or("n/a");
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(format!("◆ {verdict}   "), YELLOW),

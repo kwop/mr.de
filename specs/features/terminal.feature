@@ -7,6 +7,7 @@ Feature: Review merge requests in an interactive terminal
     Given I launch mrde-tui with --demo
     When I navigate the inbox, reader, files, radar, history and settings
     Then the terminal responds to keyboard and mouse navigation
+    And provider label colors and white scoped value segments stay readable
     And data and review results come from synthetic fixtures
     And no credentials, forge request or Claude process are used
 
@@ -24,6 +25,7 @@ Feature: Review merge requests in an interactive terminal
     When I explicitly calculate its radar or update its median
     Then the shared services use the same worktree, measurements and caches as the desktop
     And missing measurements remain n/a
+    And the verdict and measured-axis count remain visible in the compact radar
     And selecting an axis reveals its raw measurement, evidence and limitations
     And repository-proposed lint commands require explicit authorization
 

@@ -253,3 +253,35 @@ fn confirmation_keeps_commit_and_buttons_visible_with_long_scrolled_context() {
     assert!(text.contains("y Confirm"));
     assert!(app.confirmation.is_some());
 }
+
+#[test]
+fn pale_and_dark_labels_remain_readable_without_provider_text_color() {
+    use ratatui::style::Color;
+    let mut app = App::demo();
+    mrde_tui::snapshot::scenario(&mut app, "inbox").unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(140, 44)).unwrap();
+    View::default().draw_for_test(&mut terminal, &mut app);
+    let cells = terminal.backend().buffer().content();
+    let pale: Vec<_> = cells
+        .iter()
+        .filter(|c| c.bg == Color::Rgb(255, 236, 219) && !c.symbol().trim().is_empty())
+        .collect();
+    assert!(!pale.is_empty());
+    assert!(pale.iter().all(|c| c.fg == Color::Black));
+    let dark: Vec<_> = cells
+        .iter()
+        .filter(|c| c.bg == Color::Rgb(0, 51, 204) && !c.symbol().trim().is_empty())
+        .collect();
+    assert!(!dark.is_empty());
+    assert!(dark.iter().all(|c| c.fg == Color::White));
+}
+
+#[test]
+fn compact_radar_keeps_the_verdict_and_measured_count() {
+    let mut app = App::demo();
+    app.config.languages.interface = Language::French;
+    mrde_tui::snapshot::scenario(&mut app, "radar").unwrap();
+    let text = rendered(&mut app, 80, 24);
+    assert!(text.contains("Approfondie"));
+    assert!(text.contains("8/9"));
+}
