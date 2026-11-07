@@ -69,5 +69,8 @@ Update this list when the workflow surprises you, and improve the script with it
   main checkout holds another agent's work.
 - A snapshot taken while another agent was mid-edit did not compile (missing functions
   in `demo.rs`). Build right after `start --from-checkout` and resnapshot if needed.
+- `cargo fmt` reformats whole crates, including another agent's unformatted work from
+  the snapshot, which then conflicts at merge time. Format only your files:
+  `rustfmt --edition 2024 <files>`, and run `cargo fmt --all --check` after syncing.
 - `target/` is about 30 GB here. `start` clones only `debug/deps`, `debug/build`,
   `debug/.fingerprint`, `tools`, and `zig`, not the 10 GB `debug/incremental`.
